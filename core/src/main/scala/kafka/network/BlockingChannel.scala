@@ -57,6 +57,7 @@ class BlockingChannel( val host: String,
           channel.socket.setReceiveBufferSize(readBufferSize)
         if(writeBufferSize > 0)
           channel.socket.setSendBufferSize(writeBufferSize)
+        //--flag--  阻塞型模式用法
         channel.configureBlocking(true)
         channel.socket.setSoTimeout(readTimeoutMs)
         channel.socket.setKeepAlive(true)

@@ -31,6 +31,8 @@ import scala.collection.mutable
 
 /**
  * A thread that answers kafka requests.
+  *
+  * 用来处理 请求队列中的数据
  */
 class KafkaRequestHandler(id: Int,
                           brokerId: Int,
@@ -92,6 +94,15 @@ class KafkaRequestHandler(id: Int,
 
 }
 
+/**
+  * 请求队列线程池
+  *
+  * @param brokerId
+  * @param requestChannel
+  * @param apis
+  * @param time
+  * @param numThreads
+  */
 class KafkaRequestHandlerPool(val brokerId: Int,
                               val requestChannel: RequestChannel,
                               val apis: KafkaApis,

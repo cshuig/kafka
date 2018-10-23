@@ -82,8 +82,8 @@ public class ChannelBuilders {
         return create(securityProtocol, Mode.SERVER, JaasContext.Type.SERVER, config, listenerName,
                 isInterBrokerListener, null, true, credentialCache, tokenCache);
     }
-
     private static ChannelBuilder create(SecurityProtocol securityProtocol,
+
                                          Mode mode,
                                          JaasContext.Type contextType,
                                          AbstractConfig config,
@@ -100,6 +100,8 @@ public class ChannelBuilders {
             configs = config.valuesWithPrefixOverride(listenerName.configPrefix());
 
         ChannelBuilder channelBuilder;
+
+        //--flag-- 根据不同的安全协议，构建不同的安全通道
         switch (securityProtocol) {
             case SSL:
                 requireNonNullMode(mode, securityProtocol);

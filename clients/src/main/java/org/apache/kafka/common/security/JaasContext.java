@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * --flag-- kafka 安全上下文；
+ */
 public class JaasContext {
 
     private static final Logger LOG = LoggerFactory.getLogger(JaasUtils.class);

@@ -36,10 +36,12 @@ public class NetworkReceive implements Receive {
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
 
     private final String source;
+    //--flag-- 只用来存储消息总长度， 是一个整形，占用 4个字节
     private final ByteBuffer size;
     private final int maxSize;
     private final MemoryPool memoryPool;
     private int requestedBufferSize = -1;
+    //--flag-- 核心： 从通道读取数据并存储 的实际请求数据的缓冲区
     private ByteBuffer buffer;
 
 
@@ -118,13 +120,18 @@ public class NetworkReceive implements Receive {
     @Deprecated
     public long readFromReadableChannel(ReadableByteChannel channel) throws IOException {
         int read = 0;
+
         if (size.hasRemaining()) {
+            //--flag-- 从通道中将前4个字节读取出来
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
+            //--flag-- 判断缓冲区是否填满
             if (!size.hasRemaining()) {
+                // 将缓冲区复位即： position=0
                 size.rewind();
+                // V2版本消息格式协议中，第一个位置是一个整形,代表消息总长度
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
@@ -137,11 +144,13 @@ public class NetworkReceive implements Receive {
             }
         }
         if (buffer == null && requestedBufferSize != -1) { //we know the size we want but havent been able to allocate it yet
+            // 试着申请一块内存，如果broker服务器内存不够用，则无法申请
             buffer = memoryPool.tryAllocate(requestedBufferSize);
             if (buffer == null)
                 log.trace("Broker low on memory - could not allocate buffer of size {} for source {}", requestedBufferSize, source);
         }
         if (buffer != null) {
+            // 将通道数据读取并写入数据缓冲区
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)
                 throw new EOFException();

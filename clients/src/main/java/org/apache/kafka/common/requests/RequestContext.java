@@ -29,6 +29,9 @@ import java.nio.ByteBuffer;
 
 import static org.apache.kafka.common.protocol.ApiKeys.API_VERSIONS;
 
+/**
+ * 每个请求数据，都会构造一个请求上下文对象
+ */
 public class RequestContext {
     public final RequestHeader header;
     public final String connectionId;

@@ -20,8 +20,8 @@ package kafka
 import java.util.Properties
 
 import joptsimple.OptionParser
-import kafka.utils.Implicits._
 import kafka.server.{KafkaServer, KafkaServerStartable}
+import kafka.utils.Implicits._
 import kafka.utils.{CommandLineUtils, Exit, Logging}
 import org.apache.kafka.common.utils.{Java, LoggingSignalHandler, OperatingSystem, Utils}
 
@@ -29,8 +29,25 @@ import scala.collection.JavaConverters._
 
 object Kafka extends Logging {
 
+  /**
+    * --flag-- 启动参数指定： 应是可以覆盖 server.properties 文件中的属性值的 properties 文件
+    * @param args
+    *             第一个参数是 server.properties
+    *             后面的是可以选覆盖参数配置，用法如下
+    *             --override broker.id=2 --override log.cleanup.policy=compact
+    *
+    * 不能出现的参数用法：
+    *               1、不能出现多个等号的表达式如： a=b=c  ； Invalid command line properties: a=b=c
+    *               2、--override broker.id=1 broker.id=2  ; 这个会报：Found non argument parameters: broker.id=2
+    *               3、broker.id=1 broker.id=2；  Found non argument parameters: broker.id=1,broker.id=2
+    *               4、broker.id=1 --override broker.id=2  ； Found non argument parameters: broker.id=1
+    *
+    * @return 将 properties 文件内容解析成 Properties 对象
+    */
   def getPropsFromArgs(args: Array[String]): Properties = {
+    //--flag--  选项解析器，并指定不允许缩写
     val optionParser = new OptionParser(false)
+    //--flag-- accepts：表示可以接受的参数；这里指定可以接受： --override
     val overrideOpt = optionParser.accepts("override", "Optional property that should override values set in server.properties file")
       .withRequiredArg()
       .ofType(classOf[String])
@@ -39,15 +56,17 @@ object Kafka extends Logging {
       CommandLineUtils.printUsageAndDie(optionParser, "USAGE: java [options] %s server.properties [--override property=value]*".format(classOf[KafkaServer].getSimpleName()))
     }
 
+    //--flag--  通过 FileInputStream 将 配置文件加载进 Properties 实例对象中
     val props = Utils.loadProps(args(0))
 
+    //--flag--  额外配置的可覆盖 server.properties 中的选项配置
     if (args.length > 1) {
       val options = optionParser.parse(args.slice(1, args.length): _*)
 
       if (options.nonOptionArguments().size() > 0) {
         CommandLineUtils.printUsageAndDie(optionParser, "Found non argument parameters: " + options.nonOptionArguments().toArray.mkString(","))
       }
-
+      //--flag-- 将 --override 参数覆盖掉 server.properties 中的默认配置值
       props ++= CommandLineUtils.parseKeyValueArgs(options.valuesOf(overrideOpt).asScala)
     }
     props

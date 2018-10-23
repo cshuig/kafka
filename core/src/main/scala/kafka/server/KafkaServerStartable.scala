@@ -23,8 +23,18 @@ import kafka.metrics.KafkaMetricsReporter
 import kafka.utils.{Exit, Logging, VerifiableProperties}
 
 object KafkaServerStartable {
+  /**
+    * --flag-- 通过静态方法的方式构造一个 KafkaServerStartable 对象实例
+    *
+    * @param serverProps  server.properties 配置文件
+    * @return
+    */
   def fromProps(serverProps: Properties) = {
     val reporters = KafkaMetricsReporter.startReporters(new VerifiableProperties(serverProps))
+
+    /**
+      * --flag-- KafkaConfig 对象通过 Properties 配置文件，如 server.properties 构造
+      */
     new KafkaServerStartable(KafkaConfig.fromProps(serverProps, false), reporters)
   }
 }
@@ -32,6 +42,11 @@ object KafkaServerStartable {
 class KafkaServerStartable(val staticServerConfig: KafkaConfig, reporters: Seq[KafkaMetricsReporter]) extends Logging {
   private val server = new KafkaServer(staticServerConfig, kafkaMetricsReporters = reporters)
 
+  /**
+    * --flag-- 定义一个辅构造函数， 它调用 主构造函数
+    * @param serverConfig
+    * @return
+    */
   def this(serverConfig: KafkaConfig) = this(serverConfig, Seq.empty)
 
   def startup() {

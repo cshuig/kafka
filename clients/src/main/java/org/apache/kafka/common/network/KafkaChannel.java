@@ -29,6 +29,7 @@ import java.util.Objects;
 
 public class KafkaChannel {
     private final String id;
+    //--flag-- 传输通道
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     // Tracks accumulated network thread time. This is updated on the network thread.
@@ -183,8 +184,10 @@ public class KafkaChannel {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress, connection id is " + id);
         this.send = send;
+        //--flag-- 给传输通道 添加 可以写事件，这样就能触发： Processor -> run() -> poll() -> selector.poll(300) -> selector.pollSelectionKeys()#key.isWritable()
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
+
 
     public NetworkReceive read() throws IOException {
         NetworkReceive result = null;
@@ -194,8 +197,8 @@ public class KafkaChannel {
         }
 
         receive(receive);
-        if (receive.complete()) {
-            receive.payload().rewind();
+        if (receive.complete()) {   // 判断缓冲区是否填满，填满说明本次接收完
+            receive.payload().rewind(); // 将数据缓冲区复位 position=0，为什么了从头开始读取数据
             result = receive;
             receive = null;
         } else if (receive.requiredMemoryAmountKnown() && !receive.memoryAllocated() && isInMutableState()) {

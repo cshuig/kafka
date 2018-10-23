@@ -22,6 +22,16 @@ import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * --flag-- kafka 安全配置工具
+ *
+ *  使用：
+ *      设置 kafka_client_jaas.conf 的路径：
+ *          启动 JVM 参数：
+ *              -Djava.security.auth.login.config=/home/admin/kafka_client_jaas.conf
+ *              或者
+ *              System.setProperty("java.security.auth.login.config", “/home/admin/kafka_client_jaas.conf");
+ */
 public final class JaasUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JaasUtils.class);
     public static final String JAVA_LOGIN_CONFIG_PARAM = "java.security.auth.login.config";

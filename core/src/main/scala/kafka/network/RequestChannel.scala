@@ -68,6 +68,16 @@ object RequestChannel extends Logging {
     }
   }
 
+  /**
+    * 客户端每个请求都会构造出一个对应的 Request 对象
+    *
+    * @param processor  Processor线程的数组id
+    * @param context  请求上下文对象
+    * @param startTimeNanos 开始时间
+    * @param memoryPool
+    * @param buffer 请求数据缓冲区
+    * @param metrics
+    */
   class Request(val processor: Int,
                 val context: RequestContext,
                 val startTimeNanos: Long,
@@ -230,7 +240,7 @@ object RequestChannel extends Logging {
                  val responseAsString: Option[String]) {
     request.responseCompleteTimeNanos = Time.SYSTEM.nanoseconds
     if (request.apiLocalCompleteTimeNanos == -1L) request.apiLocalCompleteTimeNanos = Time.SYSTEM.nanoseconds
-
+    //--flag-- 响应对应的 Processor 线程数组下标值
     def processor: Int = request.processor
 
     override def toString =
@@ -243,10 +253,17 @@ object RequestChannel extends Logging {
   case object CloseConnectionAction extends ResponseAction
 }
 
+/**
+  * --flag-- 请求通道
+  * 持有一个全局 请求队列：requestQueue，默认大小 500， 超过会被阻塞
+  *
+  * @param queueSize
+  */
 class RequestChannel(val queueSize: Int) extends KafkaMetricsGroup {
   import RequestChannel._
   val metrics = new RequestChannel.Metrics
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
+  //--flag-- 持有所有的 Processor 线程
   private val processors = new ConcurrentHashMap[Int, Processor]()
 
   newGauge(RequestQueueSizeMetric, new Gauge[Int] {
@@ -281,7 +298,9 @@ class RequestChannel(val queueSize: Int) extends KafkaMetricsGroup {
     requestQueue.put(request)
   }
 
-  /** Send a response back to the socket server to be sent over the network */
+  /** Send a response back to the socket server to be sent over the network
+    * 将响应发送回要通过网络发送的套接字服务器
+    * */
   def sendResponse(response: RequestChannel.Response) {
     if (isTraceEnabled) {
       val requestHeader = response.request.header

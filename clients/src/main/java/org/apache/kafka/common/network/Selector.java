@@ -104,8 +104,10 @@ public class Selector implements Selectable, AutoCloseable {
     private final Map<String, KafkaChannel> channels;
     private final Set<KafkaChannel> explicitlyMutedChannels;
     private boolean outOfMemory;
-    private final List<Send> completedSends;
+    //--flag-- 用来接收已经完整接收到的数据
     private final List<NetworkReceive> completedReceives;
+    private final List<Send> completedSends;
+    //--flag-- 每个通道数据取出后，会将数据添加到相应的 Deque 队列中； 因为一个 通道能读到多个数据
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
     private final Set<SelectionKey> immediatelyConnectedKeys;
     private final Map<String, KafkaChannel> closingChannels;
@@ -263,7 +265,9 @@ public class Selector implements Selectable, AutoCloseable {
      * </p>
      */
     public void register(String id, SocketChannel socketChannel) throws IOException {
+        //--flag-- 校验是否被注册
         ensureNotRegistered(id);
+        //--flag-- 为这个新通道注册可以读取权限，才能收到远程发送过来的数据
         registerChannel(id, socketChannel, SelectionKey.OP_READ);
     }
 
@@ -275,6 +279,7 @@ public class Selector implements Selectable, AutoCloseable {
     }
 
     private SelectionKey registerChannel(String id, SocketChannel socketChannel, int interestedOps) throws IOException {
+        //--flag-- 将通道注册到选择器上
         SelectionKey key = socketChannel.register(nioSelector, interestedOps);
         KafkaChannel channel = buildAndAttachKafkaChannel(socketChannel, id, key);
         this.channels.put(id, channel);
@@ -286,6 +291,7 @@ public class Selector implements Selectable, AutoCloseable {
     private KafkaChannel buildAndAttachKafkaChannel(SocketChannel socketChannel, String id, SelectionKey key) throws IOException {
         try {
             KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize, memoryPool);
+            //--flag-- 将自定义的对象，附加到key对象上，使用见：{link: channel(SelectionKey key)} 方法
             key.attach(channel);
             return channel;
         } catch (Exception e) {
@@ -387,6 +393,9 @@ public class Selector implements Selectable, AutoCloseable {
             throw new IllegalArgumentException("timeout should be >= 0");
 
         boolean madeReadProgressLastCall = madeReadProgressLastPoll;
+        /**
+         * 每次poll之前，需要清空上一次的 状态
+         */
         clear();
 
         boolean dataInBuffers = !keysWithBufferedRead.isEmpty();
@@ -411,7 +420,9 @@ public class Selector implements Selectable, AutoCloseable {
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
 
+        //--flag-- numReadyKeys > 0 表示能事件发生
         if (numReadyKeys > 0 || !immediatelyConnectedKeys.isEmpty() || dataInBuffers) {
+            //--flag-- 获取到所有的事件
             Set<SelectionKey> readyKeys = this.nioSelector.selectedKeys();
 
             // Poll from channels that have buffered data (but nothing more from the underlying socket)
@@ -447,6 +458,9 @@ public class Selector implements Selectable, AutoCloseable {
 
     /**
      * handle any ready I/O on a set of selection keys
+     *
+     * --flag-- Processor 线程循环处理 I/O 事件的核心方法， 包括 读取通道的请求数据、往通道写入响应数据
+     *
      * @param selectionKeys set of keys to handle
      * @param isImmediatelyConnected true if running over a set of keys for just-connected sockets
      * @param currentTimeNanos time at which set of keys was determined
@@ -456,6 +470,7 @@ public class Selector implements Selectable, AutoCloseable {
                            boolean isImmediatelyConnected,
                            long currentTimeNanos) {
         for (SelectionKey key : determineHandlingOrder(selectionKeys)) {
+            //--flag-- 从 SelectionKey 的附加对象中取出 KafkaChannel 对象实例
             KafkaChannel channel = channel(key);
             long channelStartTimeNanos = recordTimePerConnection ? time.nanoseconds() : 0;
 
@@ -494,6 +509,11 @@ public class Selector implements Selectable, AutoCloseable {
                         sensors.successfulAuthentication.record();
                 }
 
+                /**
+                 * --flag-- 尝试读取通道数据，写入： stagedReceives，
+                 * 然后由 poll(long timeout) -> addToCompletedReceives() 方法将这个双向队列数据取出并写入 completedReceives
+                 * 最后由： Processor -> run() -> processCompletedReceives() 处理
+                 */
                 attemptRead(key, channel);
 
                 if (channel.hasBytesBuffered()) {
@@ -506,7 +526,17 @@ public class Selector implements Selectable, AutoCloseable {
                     keysWithBufferedRead.add(key);
                 }
 
-                /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
+                /* if channel is ready write to any sockets that have space in their buffer and for which we have data
+                *
+                * --flag-- 由 KafkaChannel 中的以下方法触发：
+                * public void setSend(Send send) {
+                *    if (this.send != null)
+                *        throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress, connection id is " + id);
+                *    this.send = send;
+                *    //--flag-- 给传输通道 添加 可以写事件，这样就能触发： Processor -> run() -> poll() -> selector.poll(300) -> selector.pollSelectionKeys()#key.isWritable()
+                *   this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
+                 *}
+                * */
                 if (channel.ready() && key.isWritable()) {
                     Send send = null;
                     try {
@@ -516,6 +546,7 @@ public class Selector implements Selectable, AutoCloseable {
                         throw e;
                     }
                     if (send != null) {
+                        //--flag-- 一旦发送完成，就把当前通道的发送对象写入 完成发送的对象列表; 接着由： Processor -> run() -> processCompletedSends() 处理
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
@@ -552,12 +583,20 @@ public class Selector implements Selectable, AutoCloseable {
         }
     }
 
+    /**
+     * --flag-- 尝试读取通道数据，数据太多会进行多次分阶段读取，并存储到 stagedReceives map中，一个 通道 对应 一个包含NetworkReceive的双向队列
+     *
+     * @param key
+     * @param channel
+     * @throws IOException
+     */
     private void attemptRead(SelectionKey key, KafkaChannel channel) throws IOException {
         //if channel is ready and has bytes to read from socket or buffer, and has no
         //previous receive(s) already staged or otherwise in progress then read from it
         if (channel.ready() && (key.isReadable() || channel.hasBytesBuffered()) && !hasStagedReceive(channel)
             && !explicitlyMutedChannels.contains(channel)) {
             NetworkReceive networkReceive;
+            // --flag-- 一个通道可能有多个记录，需要拆包分阶段读取并封装为一个： NetworkReceive 对象
             while ((networkReceive = channel.read()) != null) {
                 madeReadProgressLastPoll = true;
                 addToStagedReceives(channel, networkReceive);
@@ -830,6 +869,7 @@ public class Selector implements Selectable, AutoCloseable {
 
     /**
      * adds a receive to staged receives
+     * 分阶段接收存储聚合在一个 Deque 队列中
      */
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))
@@ -858,8 +898,13 @@ public class Selector implements Selectable, AutoCloseable {
         }
     }
 
+    /**
+     * --flag-- 将阶段
+     * @param channel
+     * @param stagedDeque  Deque 双向队列
+     */
     private void addToCompletedReceives(KafkaChannel channel, Deque<NetworkReceive> stagedDeque) {
-        NetworkReceive networkReceive = stagedDeque.poll();
+        NetworkReceive networkReceive = stagedDeque.poll(); // TODO 为什么只poll一次，这个队列是有多个元素
         this.completedReceives.add(networkReceive);
         this.sensors.recordBytesReceived(channel.id(), networkReceive.size());
     }

@@ -99,23 +99,35 @@ object KafkaServer {
  */
 class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNamePrefix: Option[String] = None,
                   kafkaMetricsReporters: Seq[KafkaMetricsReporter] = List()) extends Logging with KafkaMetricsGroup {
+
+  //--flag-- broker 启动完成标志
   private val startupComplete = new AtomicBoolean(false)
+
+  //--flag-- broker 是否正在关闭中...
   private val isShuttingDown = new AtomicBoolean(false)
+
+  //--flag-- broker 是否正在启动中...
   private val isStartingUp = new AtomicBoolean(false)
 
+  //--flag-- broker 关闭完成计算器， 一旦 shutdown() 执行完，这个值就变成 0 ; Kafka 类 main() 方法中主线程退出阻塞，broker进程就退出；
   private var shutdownLatch = new CountDownLatch(1)
 
+  //--flag-- jmx监控前缀配置
   private val jmxPrefix: String = "kafka.server"
 
   private var logContext: LogContext = null
 
+  //--flag-- 指标统计类
   var metrics: Metrics = null
 
+  //--flag-- broker 状态位; 默认是：NotRunning: 0, 还有 Starting: 1, RecoveringFromUncleanShutdown: 2; RunningAsBroker:3; PendingControlledShutdown: 6; BrokerShuttingDown:7
   val brokerState: BrokerState = new BrokerState
 
+  //--flag-- 消息处理接口
   var apis: KafkaApis = null
   var authorizer: Option[Authorizer] = None
   var socketServer: SocketServer = null
+  //--flag-- 处理 Processor线程 接收到并写入请求队列的客户端请求
   var requestHandlerPool: KafkaRequestHandlerPool = null
 
   var logDirFailureChannel: LogDirFailureChannel = null
@@ -130,10 +142,12 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
   var credentialProvider: CredentialProvider = null
   var tokenCache: DelegationTokenCache = null
 
+  //--flag-- 组协调器， 用来协调组内的消费者
   var groupCoordinator: GroupCoordinator = null
 
   var transactionCoordinator: TransactionCoordinator = null
 
+  //--flag-- 控制器
   var kafkaController: KafkaController = null
 
   var kafkaScheduler: KafkaScheduler = null
