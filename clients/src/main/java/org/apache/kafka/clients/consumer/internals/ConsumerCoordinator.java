@@ -61,7 +61,16 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * This class manages the coordination process with the consumer coordinator.
+ *      This class manages the coordination process with the consumer coordinator.
+ *      消费者客户端使用这个类来和服务端协调器进行所有节点有关的请求
+ *  如：心跳请求、获取和提交分区的偏移量(自动提交任务)、
+ *  发送 JoinGroup 请求、 发送 SyncGroup 请求从协调器获取到分区信息
+ *
+ *      服务端处理客户端的入口类都是在 KafkaApis 类中，它会针对不同的请求类型分发到不同的 Handler方法。
+ *  如： 服务端
+ *      处理 JoinGroup 加入组请求时，调用 handleJoinGroupRequest() 方法，
+ *      处理 SyncGroup 同步组请求时，调用 handleSyncGroupRequest() 方法
+ *
  */
 public final class ConsumerCoordinator extends AbstractCoordinator {
     private final Logger log;
@@ -81,6 +90,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     private final ConcurrentLinkedQueue<OffsetCommitCompletion> completedOffsetCommits;
 
     private boolean isLeader = false;
+    // 当前消费者订阅的 topic 列表
     private Set<String> joinedSubscription;
     private MetadataSnapshot metadataSnapshot;
     private MetadataSnapshot assignmentSnapshot;
@@ -146,10 +156,13 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     @Override
     public List<ProtocolMetadata> metadata() {
+        // joinedSubscription: 用户订阅的主题列表：private Set<String> joinedSubscription;
         this.joinedSubscription = subscriptions.subscription();
         List<ProtocolMetadata> metadataList = new ArrayList<>();
         for (PartitionAssignor assignor : assignors) {
+            // 将订阅信息转换为： Subscription 对象
             Subscription subscription = assignor.subscription(joinedSubscription);
+            // 将订阅信息序列化为 ByteBuffer，里面包含了分区分配协议和用户自定义数据(这个数据不是固定格式，而是不同类型数据需要先序列化为 ByteBuffer，达到通用目的)
             ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
             metadataList.add(new ProtocolMetadata(assignor.name(), metadata));
         }
@@ -326,17 +339,30 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return Math.min(nextAutoCommitDeadline - now, timeToNextHeartbeat(now));
     }
 
+    /**
+     *
+     * @param leaderId The id of the leader (which is this member)
+     * @param assignmentStrategy    分区分配策略
+     * @param allSubscriptions      组内所有消费者订阅信息
+     *                               key： 消费者id
+     *                               value： 消费者订阅的信息
+     * @return
+     */
     @Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         Map<String, ByteBuffer> allSubscriptions) {
+        // 获取分配分配策略实现类
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
 
+        // 组内所有订阅的 Topics
         Set<String> allSubscribedTopics = new HashSet<>();
+        // 消费者与其订阅的信息
         Map<String, Subscription> subscriptions = new HashMap<>();
         for (Map.Entry<String, ByteBuffer> subscriptionEntry : allSubscriptions.entrySet()) {
+            // 反序列化订阅信息
             Subscription subscription = ConsumerProtocol.deserializeSubscription(subscriptionEntry.getValue());
             subscriptions.put(subscriptionEntry.getKey(), subscription);
             allSubscribedTopics.addAll(subscription.topics());
@@ -344,6 +370,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         // the leader will begin watching for changes to any of the topics the group is interested in,
         // which ensures that all metadata changes will eventually be seen
+        //
         this.subscriptions.groupSubscribe(allSubscribedTopics);
         metadata.setTopics(this.subscriptions.groupSubscription());
 

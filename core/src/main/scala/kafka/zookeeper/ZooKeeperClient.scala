@@ -55,10 +55,15 @@ class ZooKeeperClient(connectString: String,
   private val initializationLock = new ReentrantReadWriteLock()
   private val isConnectedOrExpiredLock = new ReentrantLock()
   private val isConnectedOrExpiredCondition = isConnectedOrExpiredLock.newCondition()
+  //--flag-- 节点状态改变处理器
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
+  //--flag-- 子节点节点状态改变处理器
   private val zNodeChildChangeHandlers = new ConcurrentHashMap[String, ZNodeChildChangeHandler]().asScala
-  private val inFlightRequests = new Semaphore(maxInFlightRequests)
+  //--flag-- 节点状态改变处理器
   private val stateChangeHandlers = new ConcurrentHashMap[String, StateChangeHandler]().asScala
+
+  //--flag-- 信号量阻塞，同一个时刻，最多只能有 maxInFlightRequests 线程获取到锁
+  private val inFlightRequests = new Semaphore(maxInFlightRequests)
   private[zookeeper] val expiryScheduler = new KafkaScheduler(threads = 1, "zk-session-expiry-handler")
 
   private val metricNames = Set[String]()
@@ -132,6 +137,7 @@ class ZooKeeperClient(connectString: String,
       val responseQueue = new ArrayBlockingQueue[Req#Response](requests.size)
 
       requests.foreach { request =>
+        // 如果取不到锁，那么阻塞并等待
         inFlightRequests.acquire()
         try {
           inReadLock(initializationLock) {
@@ -153,6 +159,13 @@ class ZooKeeperClient(connectString: String,
   }
 
   // Visibility to override for testing
+  /**
+    *  --flag-- kafka相关的 zk 节点操作通信方法
+    *
+    * @param request
+    * @param processResponse
+    * @tparam Req
+    */
   private[zookeeper] def send[Req <: AsyncRequest](request: Req)(processResponse: Req#Response => Unit): Unit = {
     // Safe to cast as we always create a response of the right type
     def callback(response: AsyncResponse): Unit = processResponse(response.asInstanceOf[Req#Response])
@@ -161,6 +174,7 @@ class ZooKeeperClient(connectString: String,
 
     val sendTimeMs = time.hiResClockMs()
     request match {
+        // path是否存在验证
       case ExistsRequest(path, ctx) =>
         zooKeeper.exists(path, shouldWatch(request), new StatCallback {
           override def processResult(rc: Int, path: String, ctx: Any, stat: Stat): Unit =
@@ -328,6 +342,7 @@ class ZooKeeperClient(connectString: String,
   private def reinitialize(): Unit = {
     // Initialization callbacks are invoked outside of the lock to avoid deadlock potential since their completion
     // may require additional Zookeeper requests, which will block to acquire the initialization lock
+    // 初始化 zk 连接时的 前置事件
     stateChangeHandlers.values.foreach(callBeforeInitializingSession _)
 
     inWriteLock(initializationLock) {
@@ -335,6 +350,7 @@ class ZooKeeperClient(connectString: String,
         zooKeeper.close()
         info(s"Initializing a new session to $connectString.")
         // retry forever until ZooKeeper can be instantiated
+        // 永远重试，直到 ZooKeeper 可以实例化(即能连上zk)
         var connected = false
         while (!connected) {
           try {
@@ -348,7 +364,7 @@ class ZooKeeperClient(connectString: String,
         }
       }
     }
-
+    // 初始化 zk 连接时的 后置事件
     stateChangeHandlers.values.foreach(callAfterInitializingSession _)
   }
 
@@ -360,6 +376,10 @@ class ZooKeeperClient(connectString: String,
     reinitialize()
   }
 
+  /**
+    * 处理器的前置事件处理
+    * @param handler
+    */
   private def callBeforeInitializingSession(handler: StateChangeHandler): Unit = {
     try {
       handler.beforeInitializingSession()
@@ -369,6 +389,10 @@ class ZooKeeperClient(connectString: String,
     }
   }
 
+  /**
+    * 处理器的后置置事件处理
+    * @param handler
+    */
   private def callAfterInitializingSession(handler: StateChangeHandler): Unit = {
     try {
       handler.afterInitializingSession()
@@ -387,6 +411,9 @@ class ZooKeeperClient(connectString: String,
   }
 
   // package level visibility for testing only
+  /**
+    * zk 监听者，一旦监听到有 节点 状态改变，就会触发
+    */
   private[zookeeper] object ZooKeeperClientWatcher extends Watcher {
     override def process(event: WatchedEvent): Unit = {
       debug(s"Received event: $event")
@@ -415,6 +442,9 @@ class ZooKeeperClient(connectString: String,
   }
 }
 
+/**
+  * 状态变化处理器 接口
+  */
 trait StateChangeHandler {
   val name: String
   def beforeInitializingSession(): Unit = {}
@@ -422,6 +452,9 @@ trait StateChangeHandler {
   def onAuthFailure(): Unit = {}
 }
 
+/**
+  * zk节点变化处理器 接口
+  */
 trait ZNodeChangeHandler {
   val path: String
   def handleCreation(): Unit = {}
@@ -429,6 +462,9 @@ trait ZNodeChangeHandler {
   def handleDataChange(): Unit = {}
 }
 
+/**
+  * zk子节点变化处理器 接口
+  */
 trait ZNodeChildChangeHandler {
   val path: String
   def handleChildChange(): Unit = {}

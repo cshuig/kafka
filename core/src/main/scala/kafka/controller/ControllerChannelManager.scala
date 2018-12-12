@@ -110,6 +110,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
     debug(s"Controller ${config.brokerId} trying to connect to broker ${broker.id}")
     val brokerNode = broker.node(config.interBrokerListenerName)
     val logContext = new LogContext(s"[Controller id=${config.brokerId}, targetBrokerId=${brokerNode.idString}] ")
+    //--flag-- 声明一个网络客户端 函数对象
     val networkClient = {
       val channelBuilder = ChannelBuilders.clientChannelBuilder(
         config.interBrokerSecurityProtocol,
@@ -130,6 +131,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
         channelBuilder,
         logContext
       )
+      // return 语句
       new NetworkClient(
         selector,
         new ManualMetadataUpdater(Seq(brokerNode).asJava),

@@ -161,13 +161,13 @@ public class OffsetCommitRequest extends AbstractRequest {
         private final Map<TopicPartition, PartitionData> offsetData;
         private String memberId = DEFAULT_MEMBER_ID;
         private int generationId = DEFAULT_GENERATION_ID;
-        private long retentionTime = DEFAULT_RETENTION_TIME;
-
         public Builder(String groupId, Map<TopicPartition, PartitionData> offsetData) {
             super(ApiKeys.OFFSET_COMMIT);
             this.groupId = groupId;
             this.offsetData = offsetData;
         }
+
+        private long retentionTime = DEFAULT_RETENTION_TIME;
 
         public Builder setMemberId(String memberId) {
             this.memberId = memberId;

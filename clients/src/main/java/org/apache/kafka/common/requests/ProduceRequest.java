@@ -61,9 +61,7 @@ public class ProduceRequest extends AbstractRequest {
 
     private static final Schema TOPIC_PRODUCE_DATA_V0 = new Schema(
             TOPIC_NAME,
-            new Field(PARTITION_DATA_KEY_NAME, new ArrayOf(new Schema(
-                    PARTITION_ID,
-                    new Field(RECORD_SET_KEY_NAME, RECORDS)))));
+            new Field(PARTITION_DATA_KEY_NAME, new ArrayOf(new Schema(PARTITION_ID, new Field(RECORD_SET_KEY_NAME, RECORDS)))));
 
     private static final Schema PRODUCE_REQUEST_V0 = new Schema(
             new Field(ACKS_KEY_NAME, INT16, "The number of acknowledgments the producer requires the leader to have " +
@@ -108,7 +106,10 @@ public class ProduceRequest extends AbstractRequest {
      */
     private static final Schema PRODUCE_REQUEST_V5 = PRODUCE_REQUEST_V4;
 
-
+    /**
+     * 因为存在多种版本协议， 这里使用数组从将协议从0开始写入，使用的时候，只需要根据 版本号获取数组对应的 下标位置元素，就是当前请求的协议对象
+     * @return
+     */
     public static Schema[] schemaVersions() {
         return new Schema[] {PRODUCE_REQUEST_V0, PRODUCE_REQUEST_V1, PRODUCE_REQUEST_V2, PRODUCE_REQUEST_V3,
             PRODUCE_REQUEST_V4, PRODUCE_REQUEST_V5};

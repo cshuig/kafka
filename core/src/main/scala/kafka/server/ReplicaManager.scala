@@ -36,8 +36,7 @@ import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.protocol.Errors.UNKNOWN_TOPIC_OR_PARTITION
-import org.apache.kafka.common.protocol.Errors.KAFKA_STORAGE_ERROR
+import org.apache.kafka.common.protocol.Errors.{KAFKA_STORAGE_ERROR, UNKNOWN_TOPIC_OR_PARTITION}
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.requests.DescribeLogDirsResponse.{LogDirInfo, ReplicaInfo}
 import org.apache.kafka.common.requests.EpochEndOffset._
@@ -450,6 +449,9 @@ class ReplicaManager(val config: KafkaConfig,
    * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
    * the callback function will be triggered either when timeout or the required acks are satisfied;
    * if the callback function itself is already synchronized on some object then pass this object to avoid deadlock.
+    *
+    * 将消息追加到分区的Leader副本，并等待它们完全复制到其他副本;
+    * 当超时或满足所需的ack时，将触发回调函数; *如果回调函数本身已经在某个对象上同步，则传递此对象以避免死锁
    */
   def appendRecords(timeout: Long,
                     requiredAcks: Short,
@@ -461,8 +463,8 @@ class ReplicaManager(val config: KafkaConfig,
                     processingStatsCallback: Map[TopicPartition, RecordsProcessingStats] => Unit = _ => ()) {
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = time.milliseconds
-      val localProduceResults = appendToLocalLog(internalTopicsAllowed = internalTopicsAllowed,
-        isFromClient = isFromClient, entriesPerPartition, requiredAcks)
+      // 追加消息集到本地日子，然后判断是否需要立即返回响应给客户端
+      val localProduceResults = appendToLocalLog(internalTopicsAllowed = internalTopicsAllowed, isFromClient = isFromClient, entriesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(time.milliseconds - sTime))
 
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
@@ -787,6 +789,8 @@ class ReplicaManager(val config: KafkaConfig,
   /**
    * Fetch messages from the leader replica, and wait until enough data can be fetched and return;
    * the callback function will be triggered either when timeout or required fetch info is satisfied
+    *
+    * 向Leader副本拉取消息，并等待收集到足够的数据之后，才会返回拉取结果给客户端
    */
   def fetchMessages(timeout: Long,
                     replicaId: Int,
@@ -797,11 +801,16 @@ class ReplicaManager(val config: KafkaConfig,
                     quota: ReplicaQuota = UnboundedQuota,
                     responseCallback: Seq[(TopicPartition, FetchPartitionData)] => Unit,
                     isolationLevel: IsolationLevel) {
+    // 拉取请求是否来自：备份副本
     val isFromFollower = Request.isValidBrokerId(replicaId)
+    // 只能从 Leader副本拉取
     val fetchOnlyFromLeader = replicaId != Request.DebuggingConsumerId && replicaId != Request.FutureLocalReplicaId
+    // 如果拉取请求来自消费者，只能拉取已经提交的；如果拉取请求来自备份副本，没有拉取限制
     val fetchOnlyCommitted = !isFromFollower && replicaId != Request.FutureLocalReplicaId
 
+
     def readFromLog(): Seq[(TopicPartition, LogReadResult)] = {
+      // 读取本地日志
       val result = readFromLocalLog(
         replicaId = replicaId,
         fetchOnlyFromLeader = fetchOnlyFromLeader,

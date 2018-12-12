@@ -241,10 +241,15 @@ public class ProduceResponse extends AbstractResponse {
         return errorCounts;
     }
 
+    /**
+     * 生产请求的响应结果
+     */
     public static final class PartitionResponse {
         public Errors error;
+        // 分区的基础偏移量
         public long baseOffset;
         public long logAppendTime;
+        // 消息集成功追加到分区后返回的起始偏移量
         public long logStartOffset;
 
         public PartitionResponse(Errors error) {

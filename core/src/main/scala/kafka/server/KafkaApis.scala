@@ -17,18 +17,17 @@
 
 package kafka.server
 
-import java.nio.ByteBuffer
 import java.lang.{Long => JLong}
-import java.util.{Collections, Properties}
+import java.nio.ByteBuffer
 import java.util
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.{Collections, Properties}
 
 import kafka.admin.{AdminUtils, RackAwareMode}
 import kafka.api.{ApiVersion, KAFKA_0_11_0_IV0}
 import kafka.cluster.Partition
 import kafka.common.{OffsetAndMetadata, OffsetMetadata}
-import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.controller.KafkaController
 import kafka.coordinator.group.{GroupCoordinator, JoinGroupResult}
 import kafka.coordinator.transaction.{InitProducerIdResult, TransactionCoordinator}
@@ -37,30 +36,30 @@ import kafka.network.RequestChannel
 import kafka.network.RequestChannel.{CloseConnectionAction, NoOpAction, SendAction}
 import kafka.security.SecurityUtils
 import kafka.security.auth.{Resource, _}
+import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.utils.{CoreUtils, Logging}
 import kafka.zk.{AdminZkClient, KafkaZkClient}
+import org.apache.kafka.common.acl.{AccessControlEntry, AclBinding}
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.internals.Topic.{GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME, isInternal}
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
-import org.apache.kafka.common.record.{ControlRecordType, EndTransactionMarker, MemoryRecords, RecordBatch, RecordsProcessingStats}
+import org.apache.kafka.common.record._
 import org.apache.kafka.common.requests.CreateAclsResponse.AclCreationResponse
 import org.apache.kafka.common.requests.DeleteAclsResponse.{AclDeletionResult, AclFilterResponse}
-import org.apache.kafka.common.requests.{Resource => RResource, ResourceType => RResourceType, _}
+import org.apache.kafka.common.requests.DescribeLogDirsResponse.LogDirInfo
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
-import org.apache.kafka.common.utils.{Time, Utils}
-import org.apache.kafka.common.{Node, TopicPartition}
-import org.apache.kafka.common.requests.{SaslAuthenticateResponse, SaslHandshakeResponse}
+import org.apache.kafka.common.requests.{SaslAuthenticateResponse, SaslHandshakeResponse, Resource => RResource, ResourceType => RResourceType, _}
 import org.apache.kafka.common.resource.{Resource => AdminResource}
-import org.apache.kafka.common.acl.{AccessControlEntry, AclBinding}
-import DescribeLogDirsResponse.LogDirInfo
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.common.security.token.delegation.{DelegationToken, TokenInformation}
+import org.apache.kafka.common.utils.{Time, Utils}
+import org.apache.kafka.common.{Node, TopicPartition}
 
-import scala.collection._
 import scala.collection.JavaConverters._
+import scala.collection._
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
 
@@ -100,50 +99,71 @@ class KafkaApis(val requestChannel: RequestChannel,
     try {
       trace(s"Handling request:${request.requestDesc(true)} from connection ${request.context.connectionId};" +
         s"securityProtocol:${request.context.securityProtocol},principal:${request.context.principal}")
+      println("request.header.apiKey = " + request.header.apiKey)
       request.header.apiKey match {
+          // 生产数据
         case ApiKeys.PRODUCE => handleProduceRequest(request)
         case ApiKeys.FETCH => handleFetchRequest(request)
+
         case ApiKeys.LIST_OFFSETS => handleListOffsetRequest(request)
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
         case ApiKeys.LEADER_AND_ISR => handleLeaderAndIsrRequest(request)
         case ApiKeys.STOP_REPLICA => handleStopReplicaRequest(request)
-        case ApiKeys.UPDATE_METADATA => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN => handleControlledShutdownRequest(request)
+
+          /** begin ==> 协调器相关请求处理 **/
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
+        case ApiKeys.UPDATE_METADATA => handleUpdateMetadataRequest(request)
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
         case ApiKeys.FIND_COORDINATOR => handleFindCoordinatorRequest(request)
+          // 协调器 第一阶段： 消费者加入 组
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
+        // 协调器 第二阶段： 消费者加入 组
+        case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
+
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
-        case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
         case ApiKeys.DESCRIBE_GROUPS => handleDescribeGroupRequest(request)
         case ApiKeys.LIST_GROUPS => handleListGroupsRequest(request)
+        case ApiKeys.DELETE_GROUPS => handleDeleteGroupsRequest(request)
+        /** end ==> 协调器相关请求处理 **/
+
         case ApiKeys.SASL_HANDSHAKE => handleSaslHandshakeRequest(request)
         case ApiKeys.API_VERSIONS => handleApiVersionsRequest(request)
+
+        // TODO add 3
         case ApiKeys.CREATE_TOPICS => handleCreateTopicsRequest(request)
         case ApiKeys.DELETE_TOPICS => handleDeleteTopicsRequest(request)
         case ApiKeys.DELETE_RECORDS => handleDeleteRecordsRequest(request)
+
         case ApiKeys.INIT_PRODUCER_ID => handleInitProducerIdRequest(request)
         case ApiKeys.OFFSET_FOR_LEADER_EPOCH => handleOffsetForLeaderEpochRequest(request)
+
         case ApiKeys.ADD_PARTITIONS_TO_TXN => handleAddPartitionToTxnRequest(request)
         case ApiKeys.ADD_OFFSETS_TO_TXN => handleAddOffsetsToTxnRequest(request)
         case ApiKeys.END_TXN => handleEndTxnRequest(request)
         case ApiKeys.WRITE_TXN_MARKERS => handleWriteTxnMarkersRequest(request)
         case ApiKeys.TXN_OFFSET_COMMIT => handleTxnOffsetCommitRequest(request)
+
         case ApiKeys.DESCRIBE_ACLS => handleDescribeAcls(request)
         case ApiKeys.CREATE_ACLS => handleCreateAcls(request)
         case ApiKeys.DELETE_ACLS => handleDeleteAcls(request)
+
+        // TODO add 2 优先级不高
         case ApiKeys.ALTER_CONFIGS => handleAlterConfigsRequest(request)
         case ApiKeys.DESCRIBE_CONFIGS => handleDescribeConfigsRequest(request)
+
         case ApiKeys.ALTER_REPLICA_LOG_DIRS => handleAlterReplicaLogDirsRequest(request)
         case ApiKeys.DESCRIBE_LOG_DIRS => handleDescribeLogDirsRequest(request)
         case ApiKeys.SASL_AUTHENTICATE => handleSaslAuthenticateRequest(request)
+
+          // TODO add 1
         case ApiKeys.CREATE_PARTITIONS => handleCreatePartitionsRequest(request)
+
         case ApiKeys.CREATE_DELEGATION_TOKEN => handleCreateTokenRequest(request)
         case ApiKeys.RENEW_DELEGATION_TOKEN => handleRenewTokenRequest(request)
         case ApiKeys.EXPIRE_DELEGATION_TOKEN => handleExpireTokenRequest(request)
         case ApiKeys.DESCRIBE_DELEGATION_TOKEN => handleDescribeTokensRequest(request)
-        case ApiKeys.DELETE_GROUPS => handleDeleteGroupsRequest(request)
       }
     } catch {
       case e: FatalExitError => throw e
@@ -313,6 +333,7 @@ class KafkaApis(val requestChannel: RequestChannel,
               if (partitionData.metadata != null && partitionData.metadata.length > config.offsetMetadataMaxSize)
                 (topicPartition, Errors.OFFSET_METADATA_TOO_LARGE)
               else {
+                // 旧版本 offset是存储在zk上，需要在zk上创建节点
                 zkClient.setOrCreateConsumerOffset(offsetCommitRequest.groupId, topicPartition, partitionData.offset)
                 (topicPartition, Errors.NONE)
               }
@@ -343,6 +364,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         val defaultExpireTimestamp = offsetRetention + currentTimestamp
         val partitionData = authorizedTopicRequestInfo.mapValues { partitionData =>
           val metadata = if (partitionData.metadata == null) OffsetMetadata.NoMetadata else partitionData.metadata
+          println(">>>>>>>>>>>>>partitionData = " + partitionData)
           new OffsetAndMetadata(
             offsetMetadata = OffsetMetadata(partitionData.offset, metadata),
             commitTimestamp = currentTimestamp,
@@ -883,17 +905,13 @@ class KafkaApis(val requestChannel: RequestChannel,
                           properties: Properties = new Properties()): MetadataResponse.TopicMetadata = {
     try {
       adminZkClient.createTopic(topic, numPartitions, replicationFactor, properties, RackAwareMode.Safe)
-      info("Auto creation of topic %s with %d partitions and replication factor %d is successful"
-        .format(topic, numPartitions, replicationFactor))
-      new MetadataResponse.TopicMetadata(Errors.LEADER_NOT_AVAILABLE, topic, isInternal(topic),
-        java.util.Collections.emptyList())
+      info("Auto creation of topic %s with %d partitions and replication factor %d is successful".format(topic, numPartitions, replicationFactor))
+      new MetadataResponse.TopicMetadata(Errors.LEADER_NOT_AVAILABLE, topic, isInternal(topic), java.util.Collections.emptyList())
     } catch {
       case _: TopicExistsException => // let it go, possibly another broker created this topic
-        new MetadataResponse.TopicMetadata(Errors.LEADER_NOT_AVAILABLE, topic, isInternal(topic),
-          java.util.Collections.emptyList())
+        new MetadataResponse.TopicMetadata(Errors.LEADER_NOT_AVAILABLE, topic, isInternal(topic), java.util.Collections.emptyList())
       case ex: Throwable => // Catch all to prevent unhandled errors
-        new MetadataResponse.TopicMetadata(Errors.forException(ex), topic, isInternal(topic),
-          java.util.Collections.emptyList())
+        new MetadataResponse.TopicMetadata(Errors.forException(ex), topic, isInternal(topic), java.util.Collections.emptyList())
     }
   }
 
@@ -905,6 +923,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     topic match {
       case GROUP_METADATA_TOPIC_NAME =>
+        // 副本数量不能超过存活的broker数量
         if (aliveBrokers.size < config.offsetsTopicReplicationFactor) {
           error(s"Number of alive brokers '${aliveBrokers.size}' does not meet the required replication factor " +
             s"'${config.offsetsTopicReplicationFactor}' for the offsets topic (configured via " +
@@ -912,8 +931,7 @@ class KafkaApis(val requestChannel: RequestChannel,
             s"and not all brokers are up yet.")
           new MetadataResponse.TopicMetadata(Errors.COORDINATOR_NOT_AVAILABLE, topic, true, java.util.Collections.emptyList())
         } else {
-          createTopic(topic, config.offsetsTopicPartitions, config.offsetsTopicReplicationFactor.toInt,
-            groupCoordinator.offsetsTopicConfigs)
+          createTopic(topic, config.offsetsTopicPartitions, config.offsetsTopicReplicationFactor.toInt, groupCoordinator.offsetsTopicConfigs)
         }
       case TRANSACTION_STATE_TOPIC_NAME =>
         if (aliveBrokers.size < config.transactionTopicReplicationFactor) {
@@ -931,7 +949,9 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   private def getOrCreateInternalTopic(topic: String, listenerName: ListenerName): MetadataResponse.TopicMetadata = {
+    // 先通过 topic 的到它所有的分区元数据对象列表： Iterable[MetadataResponse.PartitionMetadata]
     val topicMetadata = metadataCache.getTopicMetadata(Set(topic), listenerName)
+    // 如果 headOption get不存在(也就是集合为空时)， 那么创建内部topic
     topicMetadata.headOption.getOrElse(createInternalTopic(topic))
   }
 
@@ -1093,8 +1113,7 @@ class KafkaApis(val requestChannel: RequestChannel,
             } else {
               val (authorizedPartitions, unauthorizedPartitions) = offsetFetchRequest.partitions.asScala
                 .partition(authorizeTopicDescribe)
-              val (error, authorizedPartitionData) = groupCoordinator.handleFetchOffsets(offsetFetchRequest.groupId,
-                Some(authorizedPartitions))
+              val (error, authorizedPartitionData) = groupCoordinator.handleFetchOffsets(offsetFetchRequest.groupId, Some(authorizedPartitions))
               if (error != Errors.NONE)
                 offsetFetchRequest.getErrorResponse(requestThrottleMs, error)
               else {
@@ -1123,9 +1142,15 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendErrorResponseMaybeThrottle(request, Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED.exception)
     else {
       // get metadata (and create the topic if necessary)
-      val (partition, topicMetadata) = findCoordinatorRequest.coordinatorType match {
+      val (partition, consumer_offsets_topicMetadata) = findCoordinatorRequest.coordinatorType match {
         case FindCoordinatorRequest.CoordinatorType.GROUP =>
+          // 定位group对应的__consumer_offsets分区号
           val partition = groupCoordinator.partitionFor(findCoordinatorRequest.coordinatorKey)
+          /**
+            * 这一步太多余了，绕一大圈得到 TopicMetadata 在这里的作用并不那么大，因为后面用到它的逻辑中，只是得到分区对应的PartitionState实例
+            *
+            * 得到 __consumer_offsets topic的 TopicMetadata 实例对象，里面包含了此topic的所有分区元数据对象列表 List<PartitionMetadata>
+            */
           val metadata = getOrCreateInternalTopic(GROUP_METADATA_TOPIC_NAME, request.context.listenerName)
           (partition, metadata)
 
@@ -1139,15 +1164,19 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
-        val responseBody = if (topicMetadata.error != Errors.NONE) {
+        val responseBody = if (consumer_offsets_topicMetadata.error != Errors.NONE) {
           new FindCoordinatorResponse(requestThrottleMs, Errors.COORDINATOR_NOT_AVAILABLE, Node.noNode)
         } else {
-          val coordinatorEndpoint = topicMetadata.partitionMetadata.asScala
+          /**
+            * 绕了一大圈。。 其实可以在上面直接获取到 leaderNode， 没必调用 metadataCache.getTopicMetadata() 将所有的 partitionMetadata 都计算一遍
+            * 直接通过 metadataCache.getPartitionInfo() 获取到指定分区的 PartitionState 对象
+            */
+          val coordinatorEndpointLeaderNode = consumer_offsets_topicMetadata.partitionMetadata.asScala
             .find(_.partition == partition)
-            .map(_.leader)
-            .flatMap(p => Option(p))
+            .map(_.leader)  // 获取Leader所在的 broker 节点实例对象： Node
+            .flatMap(p => Option(p))  // 用 Option 封装一层
 
-          coordinatorEndpoint match {
+          coordinatorEndpointLeaderNode match {
             case Some(endpoint) if !endpoint.isEmpty =>
               new FindCoordinatorResponse(requestThrottleMs, Errors.NONE, endpoint)
             case _ =>
@@ -1200,10 +1229,22 @@ class KafkaApis(val requestChannel: RequestChannel,
     val joinGroupRequest = request.body[JoinGroupRequest]
 
     // the callback for sending a join-group response
+    /**
+      *    为了保证高性能，虽然服务端不能立即返回响应结果给消费者，
+      * 但是并不意味着服务端对每个请求的处理都是阻塞的。
+      *    要既要做到不能阻塞客户端请求， 又要必须返回响应结果给消费者，服务端做法如下：
+      * 在处理每一个请求时，首先定义一个 "发送响应结果的回调方法, 也就是这个方法", 回调方法会被传给
+      * 负责消费组相关业务逻辑的消费组协调器， 一旦协调器认为请求完成时，就会调用这个回调方法发送响应结果给消费者
+      * @param joinResult
+      *                   参数是 加入组的结果
+      */
     def sendResponseCallback(joinResult: JoinGroupResult) {
       val members = joinResult.members map { case (memberId, metadataArray) => (memberId, ByteBuffer.wrap(metadataArray)) }
 
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
+        /**
+          * 通过 加入组的结果 封装成 加入组的响应，返回给客户端
+          */
         val responseBody = new JoinGroupResponse(requestThrottleMs, joinResult.error, joinResult.generationId,
           joinResult.subProtocol, joinResult.memberId, joinResult.leaderId, members.asJava)
 
@@ -1228,24 +1269,39 @@ class KafkaApis(val requestChannel: RequestChannel,
       )
     } else {
       // let the coordinator to handle join-group
-      val protocols = joinGroupRequest.groupProtocols().asScala.map(protocol =>
-        (protocol.name, Utils.toArray(protocol.metadata))).toList
+      val protocols = joinGroupRequest.groupProtocols().asScala.map(protocol => (protocol.name, Utils.toArray(protocol.metadata))).toList
       groupCoordinator.handleJoinGroup(
         joinGroupRequest.groupId,
         joinGroupRequest.memberId,
+
+        // 发送请求的客户端编号
         request.header.clientId,
+        // 发送请求的客户端地址
         request.session.clientAddress.toString,
-        joinGroupRequest.rebalanceTimeout,
-        joinGroupRequest.sessionTimeout,
+
+        joinGroupRequest.rebalanceTimeout,  // 再平衡操作的超时时间， 协调器会从组内所有的消费者中，选择最大的时间，作为这个值
+        joinGroupRequest.sessionTimeout,  // 消费者会话超时时间
+        // 协议类型和协议内容(协议名称和元数据)
         joinGroupRequest.protocolType,
         protocols,
+
+        // 将回调函数传给 协调器
         sendResponseCallback)
     }
   }
 
+  /**
+    * 处理每个消费者发送过来的 同步组请求
+    * @param request
+    */
   def handleSyncGroupRequest(request: RequestChannel.Request) {
     val syncGroupRequest = request.body[SyncGroupRequest]
 
+    /**
+      * 将 成员状态 封装成 同步组的响应
+      * @param memberState  成员状态，即分配的分区
+      * @param error
+      */
     def sendResponseCallback(memberState: Array[Byte], error: Errors) {
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         new SyncGroupResponse(requestThrottleMs, error, ByteBuffer.wrap(memberState)))
@@ -1264,6 +1320,10 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  /**
+    * 处理 删除组 请求
+    * @param request
+    */
   def handleDeleteGroupsRequest(request: RequestChannel.Request): Unit = {
     val deleteGroupsRequest = request.body[DeleteGroupsRequest]
     var groups = deleteGroupsRequest.groups.asScala.toSet
@@ -1279,6 +1339,10 @@ class KafkaApis(val requestChannel: RequestChannel,
       new DeleteGroupsResponse(requestThrottleMs, groupDeletionResult.asJava))
   }
 
+  /**
+    * 处理 心跳请求
+    * @param request
+    */
   def handleHeartbeatRequest(request: RequestChannel.Request) {
     val heartbeatRequest = request.body[HeartbeatRequest]
 
@@ -2236,7 +2300,10 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   private def sendResponseMaybeThrottle(request: RequestChannel.Request, createResponse: Int => AbstractResponse): Unit = {
+    // 匿名函数写法： (传入参数) => {函数体}   {} 如果只有一行代码可以不写
+    //val  f = (throttleTimeMs: Int) => sendResponse(request, Some(createResponse(throttleTimeMs)));
     quotas.request.maybeRecordAndThrottle(request,
+      // 匿名函数写法，定义的时候只需要说明输入参数类型(不写类型，则会自动类型推断如这里的： throttleTimeMs)和 函数体即可(如下的： => 函数体)
       throttleTimeMs => sendResponse(request, Some(createResponse(throttleTimeMs))))
   }
 
@@ -2285,6 +2352,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         val responseString =
           if (RequestChannel.isRequestLoggingEnabled) Some(response.toString(request.context.apiVersion))
           else None
+        // 写入请求通道中间对象的响应队列中，由 Processor 线程自己去消费然后响应给客户端
         requestChannel.sendResponse(new RequestChannel.Response(request, Some(responseSend), SendAction, responseString))
       case None =>
         requestChannel.sendResponse(new RequestChannel.Response(request, None, NoOpAction, None))

@@ -84,8 +84,10 @@ class ReplicaStateMachine(config: KafkaConfig,
       replicas.foreach { replicaId =>
         val partitionAndReplica = PartitionAndReplica(partition, replicaId)
         if (controllerContext.isReplicaOnline(replicaId, partition))
+          // 在线的分区，分配在线状态
           replicaState.put(partitionAndReplica, OnlineReplica)
         else
+        // 其他的都归类为，副本删除失败的状态
         // mark replicas on dead brokers as failed for topic deletion, if they belong to a topic to be deleted.
         // This is required during controller failover since during controller failover a broker can go down,
         // so the replicas on that broker should be moved to ReplicaDeletionIneligible to be on the safer side.
@@ -94,15 +96,25 @@ class ReplicaStateMachine(config: KafkaConfig,
     }
   }
 
+  /**
+    * 处理不同状态改变事件的方法
+    *
+    * @param replicas
+    * @param targetState
+    * @param callbacks
+    */
   def handleStateChanges(replicas: Seq[PartitionAndReplica], targetState: ReplicaState,
                          callbacks: Callbacks = new Callbacks()): Unit = {
     if (replicas.nonEmpty) {
       try {
+        // 这个主要是检测上一个批次已经全部执行完，确保不会和当前批次冲突
         controllerBrokerRequestBatch.newBatch()
+        // 先通过 replicaid 进行分组，然后 调用 状态变化处理器
         replicas.groupBy(_.replica).map { case (replicaId, replicas) =>
           val partitions = replicas.map(_.topicPartition)
           doHandleStateChanges(replicaId, partitions, targetState, callbacks)
         }
+        //
         controllerBrokerRequestBatch.sendRequestsToBrokers(controllerContext.epoch)
       } catch {
         case e: Throwable => error(s"Error while moving some replicas to $targetState state", e)
@@ -141,13 +153,16 @@ class ReplicaStateMachine(config: KafkaConfig,
    * ReplicaDeletionSuccessful -> NonExistentReplica
    * -- remove the replica from the in memory partition replica assignment cache
    *
+    * --flag-- 副本状态状态处理核心方法
    * @param replicaId The replica for which the state transition is invoked
    * @param partitions The partitions on this replica for which the state transition is invoked
    * @param targetState The end state that the replica should be moved to
    */
   private def doHandleStateChanges(replicaId: Int, partitions: Seq[TopicPartition], targetState: ReplicaState,
                                    callbacks: Callbacks): Unit = {
+    // 先做一下封装与转换
     val replicas = partitions.map(partition => PartitionAndReplica(partition, replicaId))
+    // 遍历每个元素，
     replicas.foreach(replica => replicaState.getOrElseUpdate(replica, NonExistentReplica))
     val (validReplicas, invalidReplicas) = replicas.partition(replica => isValidTransition(replica, targetState))
     invalidReplicas.foreach(replica => logInvalidTransition(replica, targetState))
@@ -393,41 +408,65 @@ class ReplicaStateMachine(config: KafkaConfig,
   }
 }
 
+/**
+  * Kafka 为副本状态机 定义了 7个状态
+  */
 sealed trait ReplicaState {
   def state: Byte
   def validPreviousStates: Set[ReplicaState]
 }
 
+/**
+  *  控制器创建副本时的初始状态， 如果处于这个状态，该副本只能成为 follower 副本
+  */
 case object NewReplica extends ReplicaState {
   val state: Byte = 1
   val validPreviousStates: Set[ReplicaState] = Set(NonExistentReplica)
 }
 
+/**
+  * 启动副本后变更为 在线状态， 此时即可以成为 follower 副本，也可以成为 leader 副本
+  */
 case object OnlineReplica extends ReplicaState {
   val state: Byte = 2
   val validPreviousStates: Set[ReplicaState] = Set(NewReplica, OnlineReplica, OfflineReplica, ReplicaDeletionIneligible)
 }
 
+/**
+  * 如果 副本所在的 broker 崩溃， 该副本将变更为 离线状态
+  */
 case object OfflineReplica extends ReplicaState {
   val state: Byte = 3
   val validPreviousStates: Set[ReplicaState] = Set(NewReplica, OnlineReplica, OfflineReplica, ReplicaDeletionIneligible)
 }
 
+/**
+  * 如果开启了 topic 删除操作，topic 下所有分区的所有副本都会被删除， 此时副本进入 待删除状态
+  */
 case object ReplicaDeletionStarted extends ReplicaState {
   val state: Byte = 4
   val validPreviousStates: Set[ReplicaState] = Set(OfflineReplica)
 }
 
+/**
+  * 副本成功响应删除请求时，切换到这个状态
+  */
 case object ReplicaDeletionSuccessful extends ReplicaState {
   val state: Byte = 5
   val validPreviousStates: Set[ReplicaState] = Set(ReplicaDeletionStarted)
 }
 
+/**
+  * 当副本删除失败时，进入这个状态
+  */
 case object ReplicaDeletionIneligible extends ReplicaState {
   val state: Byte = 6
   val validPreviousStates: Set[ReplicaState] = Set(ReplicaDeletionStarted)
 }
 
+/**
+  * 副本最终成功被删除，进入这个状态
+  */
 case object NonExistentReplica extends ReplicaState {
   val state: Byte = 7
   val validPreviousStates: Set[ReplicaState] = Set(ReplicaDeletionSuccessful)

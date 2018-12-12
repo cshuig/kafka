@@ -73,7 +73,11 @@ public class NetworkClient implements KafkaClient {
     /* the state of each node's connection */
     private final ClusterConnectionStates connectionStates;
 
-    /* the set of requests currently being sent or awaiting a response */
+    /* the set of requests currently being sent or awaiting a response
+    *   存放了所有发出去，但是response还没有回来的request。
+    *   request发出去的时候，入对；
+    *   response回来，就把相对应的request出对。
+    * */
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */

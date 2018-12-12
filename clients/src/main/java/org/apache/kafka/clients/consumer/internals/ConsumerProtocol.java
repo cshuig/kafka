@@ -68,20 +68,33 @@ public class ConsumerProtocol {
     private static final Struct CONSUMER_PROTOCOL_HEADER_V0 = new Struct(CONSUMER_PROTOCOL_HEADER_SCHEMA)
             .set(VERSION_KEY_NAME, CONSUMER_PROTOCOL_V0);
 
+    /**
+     * 消费者订阅信息 Schema
+     */
     public static final Schema SUBSCRIPTION_V0 = new Schema(
             new Field(TOPICS_KEY_NAME, new ArrayOf(Type.STRING)),
             new Field(USER_DATA_KEY_NAME, Type.NULLABLE_BYTES));
+    /**
+     * topic 消费者的分配结果 Schema
+     */
     public static final Schema TOPIC_ASSIGNMENT_V0 = new Schema(
             new Field(TOPIC_KEY_NAME, Type.STRING),
             new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
+
     public static final Schema ASSIGNMENT_V0 = new Schema(
             new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT_V0)),
             new Field(USER_DATA_KEY_NAME, Type.NULLABLE_BYTES));
 
+    /**
+     * 发送消费者订阅信息前，需要将订阅信息 序列号成 ByteBuffer
+     * @param subscription
+     * @return
+     */
     public static ByteBuffer serializeSubscription(PartitionAssignor.Subscription subscription) {
         Struct struct = new Struct(SUBSCRIPTION_V0);
         struct.set(USER_DATA_KEY_NAME, subscription.userData());
         struct.set(TOPICS_KEY_NAME, subscription.topics().toArray());
+
         ByteBuffer buffer = ByteBuffer.allocate(CONSUMER_PROTOCOL_HEADER_V0.sizeOf() + SUBSCRIPTION_V0.sizeOf(struct));
         CONSUMER_PROTOCOL_HEADER_V0.writeTo(buffer);
         SUBSCRIPTION_V0.write(buffer, struct);
@@ -89,6 +102,11 @@ public class ConsumerProtocol {
         return buffer;
     }
 
+    /**
+     * 服务端协调器 将所有消费者订阅数据发送给 Leader Consumer， 然后 Leader Consumer 收到数据后，将消费者的订阅内容反序列化成 Subscription
+     * @param buffer
+     * @return
+     */
     public static PartitionAssignor.Subscription deserializeSubscription(ByteBuffer buffer) {
         Struct header = CONSUMER_PROTOCOL_HEADER_SCHEMA.read(buffer);
         Short version = header.getShort(VERSION_KEY_NAME);

@@ -29,7 +29,7 @@ object LeaderAndIsr {
 }
 
 case class LeaderAndIsr(leader: Int,
-                        leaderEpoch: Int,
+                        leaderEpoch: Int, // leader 选举次数统计
                         isr: List[Int],
                         zkVersion: Int) {
   def withZkVersion(zkVersion: Int) = copy(zkVersion = zkVersion)

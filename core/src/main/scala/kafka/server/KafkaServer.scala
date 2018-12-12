@@ -43,7 +43,6 @@ import org.apache.kafka.common.metrics.{JmxReporter, Metrics, _}
 import org.apache.kafka.common.network._
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{ControlledShutdownRequest, ControlledShutdownResponse}
-import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.security.scram.ScramMechanism
 import org.apache.kafka.common.security.token.delegation.DelegationTokenCache
 import org.apache.kafka.common.security.{JaasContext, JaasUtils}
@@ -126,13 +125,15 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
   //--flag-- 消息处理接口
   var apis: KafkaApis = null
   var authorizer: Option[Authorizer] = None
+  //--flag-- 网络通信服务端
   var socketServer: SocketServer = null
-  //--flag-- 处理 Processor线程 接收到并写入请求队列的客户端请求
+  //--flag-- 处理 Processor线程 接收到并写入 请求队列 的客户端请求
   var requestHandlerPool: KafkaRequestHandlerPool = null
 
   var logDirFailureChannel: LogDirFailureChannel = null
+  //--flag-- 日志管理器，这个就是kafka的数据存储相关
   var logManager: LogManager = null
-
+  //--flag-- 副本管理器
   var replicaManager: ReplicaManager = null
   var adminManager: AdminManager = null
   var tokenManager: DelegationTokenManager = null
@@ -260,24 +261,29 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         // Create and start the socket server acceptor threads so that the bound port is known.
         // Delay starting processors until the end of the initialization sequence to ensure
         // that credentials have been loaded before processing authentications.
+        //--flag-- 启动服务端的网络通信服务
         socketServer = new SocketServer(config, metrics, time, credentialProvider)
         socketServer.startup(startupProcessors = false)
 
-        /* start replica manager */
+        /* start replica manager ： --flag-- 副本管理器 */
         replicaManager = createReplicaManager(isShuttingDown)
         replicaManager.startup()
 
+        //--flag-- 创建
         val brokerInfo = createBrokerInfo
         zkClient.registerBrokerInZk(brokerInfo)
 
         // Now that the broker id is successfully registered, checkpoint it
+        // --flag-- 检查代理以及注册的 brokerId
         checkpointBrokerId(config.brokerId)
 
         /* start token manager */
         tokenManager = new DelegationTokenManager(config, tokenCache, time , zkClient)
         tokenManager.startup()
 
-        /* start kafka controller */
+        /* start kafka controller
+        * --flag-- 控制器
+        * */
         kafkaController = new KafkaController(config, zkClient, time, metrics, brokerInfo, tokenManager, threadNamePrefix)
         kafkaController.startup()
 
@@ -328,6 +334,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         dynamicConfigManager.startup()
 
         socketServer.startProcessors()
+        //--flag-- 修改broker状态：运行中
         brokerState.newState(RunningAsBroker)
         shutdownLatch = new CountDownLatch(1)
         startupComplete.set(true)
@@ -355,6 +362,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
       brokerTopicStats, metadataCache, logDirFailureChannel)
 
+  /**
+    * Kafka启动的时候， 需要先初始化 zkClient 连接， 同时创建 kafka需要的持久化节点
+    * @param time
+    */
   private def initZkClient(time: Time): Unit = {
     info(s"Connecting to zookeeper on ${config.zkConnect}")
 
@@ -384,6 +395,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     }
 
     _zkClient = createZkClient(config.zkConnect, secureAclsEnabled)
+    //--初始化zk客户端后， 立马创建持久化节点
     _zkClient.createTopLevelPaths()
   }
 

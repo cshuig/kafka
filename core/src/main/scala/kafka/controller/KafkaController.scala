@@ -46,6 +46,7 @@ object KafkaController extends Logging {
 
   /**
    * ControllerEventThread will shutdown once it sees this event
+    * 一旦看到此事件，ControllerEventThread将关闭
    */
   private[controller] case object ShutdownEventThread extends ControllerEvent {
     def state = ControllerState.ControllerShutdown
@@ -54,6 +55,17 @@ object KafkaController extends Logging {
 
 }
 
+/**
+  * 控制器 类
+  *
+  * @param config Kafka配置类，全局单例的
+  * @param zkClient zk通信客户端，封装了kafka在zk上的存储相关动作
+  * @param time
+  * @param metrics
+  * @param initialBrokerInfo
+  * @param tokenManager
+  * @param threadNamePrefix
+  */
 class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Time, metrics: Metrics, initialBrokerInfo: BrokerInfo,
                       tokenManager: DelegationTokenManager, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
 
@@ -65,36 +77,55 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
   val controllerContext = new ControllerContext
 
   // have a separate scheduler for the controller to be able to start and stop independently of the kafka server
+  //--flag-- 使用一个独立的线程来运行 控制器
   // visible for testing
   private[controller] val kafkaScheduler = new KafkaScheduler(1)
 
-  // visible for testing
+  // visible for testing (rateAndTimeMetrics 速率和时间指标)
   private[controller] val eventManager = new ControllerEventManager(config.brokerId,
     controllerContext.stats.rateAndTimeMetrics, _ => updateMetrics())
-
+  //--flag-- topic删除管理器
   val topicDeletionManager = new TopicDeletionManager(this, eventManager, zkClient)
+  //--flag-- 批量请求
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(this, stateChangeLogger)
+  //--flag-- 副本状态机
   val replicaStateMachine = new ReplicaStateMachine(config, stateChangeLogger, controllerContext, topicDeletionManager, zkClient, mutable.Map.empty, new ControllerBrokerRequestBatch(this, stateChangeLogger))
+  //--flag-- 分区状态机
   val partitionStateMachine = new PartitionStateMachine(config, stateChangeLogger, controllerContext, topicDeletionManager, zkClient, mutable.Map.empty, new ControllerBrokerRequestBatch(this, stateChangeLogger))
 
+  //--flag-- 控制器改变 处理程序, 监听的zk节点：/controller
   private val controllerChangeHandler = new ControllerChangeHandler(this, eventManager)
+  //--flag-- broker状态变化 处理程序
   private val brokerChangeHandler = new BrokerChangeHandler(this, eventManager)
+  //--flag-- broker修改 处理程序
   private val brokerModificationsHandlers: mutable.Map[Int, BrokerModificationsHandler] = mutable.Map.empty
+  //--flag-- topic改变 处理程序
   private val topicChangeHandler = new TopicChangeHandler(this, eventManager)
+  //--flag-- topic删除 处理程序
   private val topicDeletionHandler = new TopicDeletionHandler(this, eventManager)
+  //--flag-- 分区修改 处理程序
   private val partitionModificationsHandlers: mutable.Map[String, PartitionModificationsHandler] = mutable.Map.empty
+  //--flag-- 分区重新分配 处理程序
   private val partitionReassignmentHandler = new PartitionReassignmentHandler(this, eventManager)
+  //--flag-- leader副本选举 处理程序
   private val preferredReplicaElectionHandler = new PreferredReplicaElectionHandler(this, eventManager)
+  //--flag-- isr更改通知处理程序
   private val isrChangeNotificationHandler = new IsrChangeNotificationHandler(this, eventManager)
+  //--flag-- log日志目录通知 处理程序
   private val logDirEventNotificationHandler = new LogDirEventNotificationHandler(this, eventManager)
 
+  // 集群中激活的 控制器id值
   @volatile private var activeControllerId = -1
+  // 集群中在线的分区总数
   @volatile private var offlinePartitionCount = 0
+  // leader副本 不平衡计数
   @volatile private var preferredReplicaImbalanceCount = 0
+  // 集群中的所有 topic数量
   @volatile private var globalTopicCount = 0
+  // 集群中的所有分区数量
   @volatile private var globalPartitionCount = 0
 
-  /* single-thread scheduler to clean expired tokens */
+  /* single-thread scheduler to clean expired tokens 过期token清理线程 */
   private val tokenCleanScheduler = new KafkaScheduler(threads = 1, threadNamePrefix = "delegation-token-cleaner")
 
   newGauge(
@@ -141,6 +172,7 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
 
   /**
    * Returns true if this broker is the current controller.
+    * 判断集群中激活的 控制器id是否是当前brokerid
    */
   def isActive: Boolean = activeControllerId == config.brokerId
 
@@ -150,11 +182,14 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
    * Invoked when the controller module of a Kafka server is started up. This does not assume that the current broker
    * is the controller. It merely registers the session expiration listener and starts the controller leader
    * elector
+    * Kafka服务启动的时候， 控制器模块调用它并启动
+    * 它只是注册会话过期监听器并启动控制器 Leader 选举
    */
   def startup() = {
     zkClient.registerStateChangeHandler(new StateChangeHandler {
       override val name: String = StateChangeHandlers.ControllerHandler
       override def afterInitializingSession(): Unit = {
+        //
         eventManager.put(RegisterBrokerAndReelect)
       }
       override def beforeInitializingSession(): Unit = {
@@ -212,6 +247,8 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
    * 6. Starts the partition state machine
    * If it encounters any unexpected exception/error while becoming controller, it resigns as the current controller.
    * This ensures another controller election will be triggered and there will always be an actively serving controller
+    *
+    * --flag-- 控制器故障转移
    */
   private def onControllerFailover() {
     info("Reading controller epoch from ZooKeeper")
@@ -269,7 +306,14 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     }
   }
 
+  /**
+    * 自动处理 leader 再平衡任务线程
+    *
+    * @param delay
+    * @param unit
+    */
   private def scheduleAutoLeaderRebalanceTask(delay: Long, unit: TimeUnit): Unit = {
+    // 定时的把 自动选举副本Leader的控制器事件 放入 事件管理器中
     kafkaScheduler.schedule("auto-leader-rebalance-task", () => eventManager.put(AutoPreferredReplicaLeaderElection),
       delay = delay, unit = unit)
   }
@@ -277,6 +321,7 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
   /**
    * This callback is invoked by the zookeeper leader elector when the current broker resigns as the controller. This is
    * required to clean up internal controller data structures
+    * 当前 broker 程序作为 控制器 重新调用时，zookeeper leader 选举将调用此回调。这是清理内部控制器数据结构所必需的
    */
   private def onControllerResignation() {
     debug("Resigning")
@@ -641,6 +686,11 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     info(s"Epoch incremented to ${controllerContext.epoch}")
   }
 
+  /**
+    * --flag--
+    * 初始化控制器上下文
+    * 从zk上加载集群信息
+    */
   private def initializeControllerContext() {
     // update controller cache with delete topic information
     controllerContext.liveBrokers = zkClient.getAllBrokersInCluster.toSet
@@ -1007,6 +1057,12 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     }
   }
 
+  /**
+    * 自动选拔副本 Leader 的控制器事件
+    * 这个事件是通过只带一个线程的线程池去定时处理
+    * Preferred 选拔
+    * Election 选举
+    */
   case object AutoPreferredReplicaLeaderElection extends ControllerEvent {
 
     def state = ControllerState.AutoLeaderBalance
@@ -1307,6 +1363,7 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
 
     override def process(): Unit = {
       if (!isActive) return
+      // 在zk上注册的 /brokers/topics/[topic] ，节点内容为该topic所有分区对应的副本集合
       val partitionReplicaAssignment = zkClient.getReplicaAssignmentForTopics(immutable.Set(topic))
       val partitionsToBeAdded = partitionReplicaAssignment.filter(p =>
         !controllerContext.partitionReplicaAssignment.contains(p._1))
@@ -1365,6 +1422,7 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
 
       // We need to register the watcher if the path doesn't exist in order to detect future reassignments and we get
       // the `path exists` check for free
+      // zk的watcher事件是一次性的消费， 所以一旦 event触发后，需要再次注册一个 watcher
       if (zkClient.registerZNodeChangeHandlerAndCheckExistence(partitionReassignmentHandler)) {
         val partitionReassignment = zkClient.getPartitionReassignment
 
@@ -1381,6 +1439,10 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     }
   }
 
+  /**
+    * --flag-- 分区重新分配Isr更改
+    * @param partition
+    */
   case class PartitionReassignmentIsrChange(partition: TopicPartition) extends ControllerEvent {
     override def state: ControllerState = ControllerState.PartitionReassignment
 
@@ -1469,11 +1531,15 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     }
   }
 
+  /**
+    * 控制器： 重新选举事件
+    */
   case object Reelect extends ControllerEvent {
     override def state = ControllerState.ControllerChange
 
     override def process(): Unit = {
       val wasActiveBeforeChange = isActive
+      // 注册一个控制器变化事件
       zkClient.registerZNodeChangeHandlerAndCheckExistence(controllerChangeHandler)
       activeControllerId = zkClient.getControllerId.getOrElse(-1)
       if (wasActiveBeforeChange && !isActive) {
@@ -1483,6 +1549,19 @@ class KafkaController(val config: KafkaConfig, zkClient: KafkaZkClient, time: Ti
     }
   }
 
+  /**
+    * 在zk上创建 /brokers/ids/当前brokerid 临时接到， 节点数据为 brokerInfo 对象信息
+    * zk上的数据示例：
+    *   {
+    *      "listener_security_protocol_map":{"PLAINTEXT":"PLAINTEXT"},
+    *     "endpoints":["PLAINTEXT://DESKTOP-FD1G8KL:9092"],
+    *     "jmx_port":-1,
+    *     "host":"DESKTOP-FD1G8KL",
+    *     "timestamp":"1540373827651",
+    *     "port":9092,
+    *     "version":4
+    *     }
+    */
   case object RegisterBrokerAndReelect extends ControllerEvent {
     override def state: ControllerState = ControllerState.ControllerChange
 
@@ -1514,6 +1593,7 @@ class BrokerChangeHandler(controller: KafkaController, eventManager: ControllerE
   override val path: String = BrokerIdsZNode.path
 
   override def handleChildChange(): Unit = {
+    //在这里触发, 将对应的事件对象交给 事件管理器
     eventManager.put(controller.BrokerChange)
   }
 }
@@ -1522,6 +1602,7 @@ class BrokerModificationsHandler(controller: KafkaController, eventManager: Cont
   override val path: String = BrokerIdZNode.path(brokerId)
 
   override def handleDataChange(): Unit = {
+    //在这里触发, 将对应的事件对象交给 事件管理器
     eventManager.put(controller.BrokerModifications(brokerId))
   }
 }
@@ -1635,6 +1716,9 @@ private[controller] class ControllerStats extends KafkaMetricsGroup {
 
 }
 
+/**
+  * 控制器事件 接口
+  */
 sealed trait ControllerEvent {
   def state: ControllerState
   def process(): Unit

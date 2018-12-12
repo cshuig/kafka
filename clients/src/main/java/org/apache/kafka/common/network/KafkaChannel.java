@@ -240,8 +240,9 @@ public class KafkaChannel {
 
     private boolean send(Send send) throws IOException {
         send.writeTo(transportLayer);
+        // 因为是非阻塞型发送， 所以并不一定一次可以完全发送，可能要调用多次write
         if (send.completed())
-            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
+            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);// 完全发送完，移除事件
 
         return send.completed();
     }

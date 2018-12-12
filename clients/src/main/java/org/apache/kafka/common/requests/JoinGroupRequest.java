@@ -36,6 +36,7 @@ import static org.apache.kafka.common.protocol.types.Type.INT32;
 import static org.apache.kafka.common.protocol.types.Type.STRING;
 
 public class JoinGroupRequest extends AbstractRequest {
+
     private static final String SESSION_TIMEOUT_KEY_NAME = "session_timeout";
     private static final String REBALANCE_TIMEOUT_KEY_NAME = "rebalance_timeout";
     private static final String PROTOCOL_TYPE_KEY_NAME = "protocol_type";
@@ -72,7 +73,7 @@ public class JoinGroupRequest extends AbstractRequest {
     private static final Schema JOIN_GROUP_REQUEST_V2 = JOIN_GROUP_REQUEST_V1;
 
     public static Schema[] schemaVersions() {
-        return new Schema[] {JOIN_GROUP_REQUEST_V0, JOIN_GROUP_REQUEST_V1, JOIN_GROUP_REQUEST_V2};
+        return new Schema[]{JOIN_GROUP_REQUEST_V0, JOIN_GROUP_REQUEST_V1, JOIN_GROUP_REQUEST_V2};
     }
 
     public static final String UNKNOWN_MEMBER_ID = "";
@@ -85,9 +86,21 @@ public class JoinGroupRequest extends AbstractRequest {
     private final List<ProtocolMetadata> groupProtocols;
 
     public static class ProtocolMetadata {
+
         private final String name;
+        // 客户端传过来的是这个： StickyAssignor # List<TopicPartition> memberAssignment  subscription()
+        // ConsumerCoordinator#metadata() 在这里 ConsumerProtocol.serializeSubscription(subscription)
+        // AbstractCoordinator#sendJoinGroupRequest()
         private final ByteBuffer metadata;
 
+        /**
+         * ConsumerCoordinator#metadata() 在这里
+         * Subscription subscription = assignor.subscription(joinedSubscription);
+         * ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
+         *
+         * @param name  分区分配器名字，如 range
+         * @param metadata  就是一个 Subscription 对象
+         */
         public ProtocolMetadata(String name, ByteBuffer metadata) {
             this.name = name;
             this.metadata = metadata;
@@ -103,6 +116,7 @@ public class JoinGroupRequest extends AbstractRequest {
     }
 
     public static class Builder extends AbstractRequest.Builder<JoinGroupRequest> {
+
         private final String groupId;
         private final int sessionTimeout;
         private final String memberId;
@@ -140,20 +154,20 @@ public class JoinGroupRequest extends AbstractRequest {
         public String toString() {
             StringBuilder bld = new StringBuilder();
             bld.append("(type: JoinGroupRequest").
-                append(", groupId=").append(groupId).
-                append(", sessionTimeout=").append(sessionTimeout).
-                append(", rebalanceTimeout=").append(rebalanceTimeout).
-                append(", memberId=").append(memberId).
-                append(", protocolType=").append(protocolType).
-                append(", groupProtocols=").append(Utils.join(groupProtocols, ", ")).
-                append(")");
+                    append(", groupId=").append(groupId).
+                    append(", sessionTimeout=").append(sessionTimeout).
+                    append(", rebalanceTimeout=").append(rebalanceTimeout).
+                    append(", memberId=").append(memberId).
+                    append(", protocolType=").append(protocolType).
+                    append(", groupProtocols=").append(Utils.join(groupProtocols, ", ")).
+                    append(")");
             return bld.toString();
         }
     }
 
     private JoinGroupRequest(short version, String groupId, int sessionTimeout,
-            int rebalanceTimeout, String memberId, String protocolType,
-            List<ProtocolMetadata> groupProtocols) {
+                             int rebalanceTimeout, String memberId, String protocolType,
+                             List<ProtocolMetadata> groupProtocols) {
         super(version);
         this.groupId = groupId;
         this.sessionTimeout = sessionTimeout;

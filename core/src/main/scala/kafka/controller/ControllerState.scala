@@ -19,6 +19,9 @@ package kafka.controller
 
 import scala.collection.Seq
 
+/**
+  * 控制器 状态类
+  */
 sealed abstract class ControllerState {
 
   def value: Byte

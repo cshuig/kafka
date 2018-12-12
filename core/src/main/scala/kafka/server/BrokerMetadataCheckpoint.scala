@@ -27,6 +27,7 @@ case class BrokerMetadata(brokerId: Int)
 
 /**
   * This class saves broker's metadata to a file
+  * --flag-- 将 broker元数据信息存储到文件中
   */
 class BrokerMetadataCheckpoint(val file: File) extends Logging {
   private val lock = new Object()

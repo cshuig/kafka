@@ -16,10 +16,10 @@
  */
 package org.apache.kafka.common.record;
 
+import org.apache.kafka.common.utils.Time;
+
 import java.io.IOException;
 import java.nio.channels.GatheringByteChannel;
-
-import org.apache.kafka.common.utils.Time;
 
 /**
  * Interface for accessing the records contained in a log. The log itself is represented as a sequence of record

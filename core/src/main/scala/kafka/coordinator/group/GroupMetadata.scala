@@ -105,6 +105,12 @@ private[group] case object Empty extends GroupState
 
 
 private object GroupMetadata {
+  /**
+    * key：   操作的状态
+    * value： 前置条件
+    *
+    * 实例： 组状态为 Stable或CompletingRebalance或Empty时，才能进行 PreparingRebalance
+    */
   private val validPreviousStates: Map[GroupState, Set[GroupState]] =
     Map(Dead -> Set(Stable, PreparingRebalance, CompletingRebalance, Empty, Dead),
       CompletingRebalance -> Set(PreparingRebalance),
@@ -172,11 +178,13 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   private var state: GroupState = initialState
   var protocolType: Option[String] = None
+  // 纪元编号
   var generationId = 0
-  private var leaderId: Option[String] = None
-  private var protocol: Option[String] = None
-
+  private var leaderId: Option[String] = None // 组内 只有一个主消费者
+  private var protocol: Option[String] = None // 组内 只有一个协议
+  // 组内的消费者成员元数据
   private val members = new mutable.HashMap[String, MemberMetadata]
+  // 分区提交记录的元数据
   private val offsets = new mutable.HashMap[TopicPartition, CommitRecordMetadataAndOffset]
   private val pendingOffsetCommits = new mutable.HashMap[TopicPartition, OffsetAndMetadata]
   private val pendingTransactionalOffsetCommits = new mutable.HashMap[Long, mutable.Map[TopicPartition, CommitRecordMetadataAndOffset]]()
@@ -196,6 +204,10 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def leaderOrNull: String = leaderId.orNull
   def protocolOrNull: String = protocol.orNull
 
+  /**
+    * 添加消费者 元数据 到组内， 会更新 Leader Consumer 的编号
+    * @param member
+    */
   def add(member: MemberMetadata) {
     if (members.isEmpty)
       this.protocolType = Some(member.protocolType)
@@ -205,16 +217,17 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     assert(supportsProtocols(member.protocols))
 
     if (leaderId.isEmpty)
-      leaderId = Some(member.memberId)
+      leaderId = Some(member.memberId)  // 第一个成员作为： Leader Consumer
     members.put(member.memberId, member)
   }
 
   def remove(memberId: String) {
     members.remove(memberId)
-    if (isLeader(memberId)) {
+    if (isLeader(memberId)) { // Leader Consumer被删除
       leaderId = if (members.isEmpty) {
         None
       } else {
+        // 下一个成员升级为 Leader Consumer
         Some(members.keys.head)
       }
     }
@@ -222,12 +235,14 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def currentState = state
 
+  // 筛选出 awaitingJoinCallback=null 的对象列表; 没有发生 重新加入组 的成员， 已经在 members 中，但是没有回调对象。
   def notYetRejoinedMembers = members.values.filter(_.awaitingJoinCallback == null).toList
 
   def allMembers = members.keySet
 
   def allMemberMetadata = members.values.toList
 
+  // 从组内所有的消费者中，选择最大的会话超时时间，作为： 再平衡操作的超时时间
   def rebalanceTimeoutMs = members.values.foldLeft(0) { (timeout, member) =>
     timeout.max(member.rebalanceTimeoutMs)
   }
@@ -267,6 +282,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   def supportsProtocols(memberProtocols: Set[String]) = {
+    // 获取memberProtocols和candidateProtocols 的交际
     members.isEmpty || (memberProtocols & candidateProtocols).nonEmpty
   }
 
@@ -275,10 +291,12 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     if (members.nonEmpty) {
       generationId += 1
       protocol = Some(selectProtocol)
+      logger.info("[加入组请求] group-state 从 [{}] 切换到 [CompletingRebalance]", currentState);
       transitionTo(CompletingRebalance)
     } else {
       generationId += 1
       protocol = None
+      logger.info("[加入组请求] group-state 从 [{}] 切换到 [Empty]", currentState);
       transitionTo(Empty)
     }
     receivedConsumerOffsetCommits = false
@@ -342,6 +360,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def prepareOffsetCommit(offsets: Map[TopicPartition, OffsetAndMetadata]) {
     receivedConsumerOffsetCommits = true
+    // 先将 offset 信息更新到 group 的 pendingOffsetCommits 中（这时还没有真正提交，后面如果失败的话，是可以撤回的）
     pendingOffsetCommits ++= offsets
   }
 
@@ -421,6 +440,11 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def hasPendingOffsetCommitsFromProducer(producerId: Long) =
     pendingTransactionalOffsetCommits.contains(producerId)
 
+  /**
+    *
+    * @param topicPartitions  被删除的 topic分区 集合
+    * @return 返回每个topic分区对应的 offset元数据对象
+    */
   def removeOffsets(topicPartitions: Seq[TopicPartition]): immutable.Map[TopicPartition, OffsetAndMetadata] = {
     topicPartitions.flatMap { topicPartition =>
 

@@ -48,6 +48,8 @@ public class Schema extends Type {
 
     /**
      * Write a struct to the buffer
+     * 按字段的顺序写入最终的结果就可以按照各自数据类型的字节大小读取如:
+     * 写入： 4个字节 + 2个字节 +
      */
     @Override
     public void write(ByteBuffer buffer, Object o) {
@@ -55,6 +57,7 @@ public class Schema extends Type {
         for (BoundField field : fields) {
             try {
                 Object value = field.def.type.validate(r.get(field));
+                // 唯一目的，节省内存空间， 不同的数据类型对应的字节大小不一样， 所以由每个字段类型自己实现需要在缓冲区中占用多少自己空间，即调用不同的数据类型写入方法， 如 putShort() 、 putInt()
                 field.def.type.write(buffer, value);
             } catch (Exception e) {
                 throw new SchemaException("Error writing field '" + field.def.name + "': " +

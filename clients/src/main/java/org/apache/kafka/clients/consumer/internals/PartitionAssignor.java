@@ -72,6 +72,9 @@ public interface PartitionAssignor {
      */
     String name();
 
+    /**
+     * 消费者订阅的信息
+     */
     class Subscription {
         private final List<String> topics;
         private final ByteBuffer userData;
@@ -101,6 +104,9 @@ public interface PartitionAssignor {
         }
     }
 
+    /**
+     * 消费者的分配结果，即分配了哪些分区
+     */
     class Assignment {
         private final List<TopicPartition> partitions;
         private final ByteBuffer userData;

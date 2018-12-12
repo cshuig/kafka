@@ -95,6 +95,10 @@ public class JoinGroupResponse extends AbstractResponse {
     private final String groupProtocol;
     private final String memberId;
     private final String leaderId;
+    /**
+     * key: memberId
+     * value:   成员订阅的所有 List<Topic> 和 userDatas  {@link org.apache.kafka.clients.consumer.internals.PartitionAssignor.Subscription}
+     */
     private final Map<String, ByteBuffer> members;
 
     public JoinGroupResponse(Errors error,

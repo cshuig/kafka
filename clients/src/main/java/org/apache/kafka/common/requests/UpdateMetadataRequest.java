@@ -209,7 +209,9 @@ public class UpdateMetadataRequest extends AbstractRequest {
     }
 
     public static final class PartitionState {
+        // 基础分区状态实例
         public final BasePartitionState basePartitionState;
+        // 离线副本集合
         public final List<Integer> offlineReplicas;
 
         public PartitionState(int controllerEpoch,

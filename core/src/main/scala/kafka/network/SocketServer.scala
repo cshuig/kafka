@@ -757,6 +757,7 @@ private[kafka] class Processor(val id: Int,
       try {
         openOrClosingChannel(receive.source) match {
           case Some(channel) =>
+            // 解析请求头
             val header = RequestHeader.parse(receive.payload) // payload： 就是客户端请求的完整数据
             //--flag-- 构建请求上下文对象
             val context = new RequestContext(header, receive.source, channel.socketAddress,

@@ -73,12 +73,14 @@ public class DescribeGroupsResponse extends AbstractResponse {
 
     private static final Schema DESCRIBE_GROUPS_RESPONSE_V0 = new Schema(
             new Field(GROUPS_KEY_NAME, new ArrayOf(DESCRIBE_GROUPS_RESPONSE_GROUP_METADATA_V0)));
+
     private static final Schema DESCRIBE_GROUPS_RESPONSE_V1 = new Schema(
             THROTTLE_TIME_MS,
             new Field(GROUPS_KEY_NAME, new ArrayOf(DESCRIBE_GROUPS_RESPONSE_GROUP_METADATA_V0)));
 
     public static Schema[] schemaVersions() {
-        return new Schema[] {DESCRIBE_GROUPS_RESPONSE_V0, DESCRIBE_GROUPS_RESPONSE_V1};
+        return new Schema[] {DESCRIBE_GROUPS_RESPONSE_V0,
+                DESCRIBE_GROUPS_RESPONSE_V1};
     }
 
     public static final String UNKNOWN_STATE = "";

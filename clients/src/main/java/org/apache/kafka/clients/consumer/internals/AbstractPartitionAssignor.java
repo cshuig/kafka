@@ -50,12 +50,18 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         return new Subscription(new ArrayList<>(topics));
     }
 
+    /**
+     * 只有主消费者会调用这个方法，参数 subscriptions 是所有消费者的订阅信息
+     * @param metadata Current topic/broker metadata known by consumer
+     * @param subscriptions Subscriptions from all members provided through {@link #subscription(Set)}
+     * @return  组内每个消费者分配到的分区
+     */
     @Override
     public Map<String, Assignment> assign(Cluster metadata, Map<String, Subscription> subscriptions) {
         Set<String> allSubscribedTopics = new HashSet<>();
         for (Map.Entry<String, Subscription> subscriptionEntry : subscriptions.entrySet())
             allSubscribedTopics.addAll(subscriptionEntry.getValue().topics());
-
+// 每个topic有多少个分区
         Map<String, Integer> partitionsPerTopic = new HashMap<>();
         for (String topic : allSubscribedTopics) {
             Integer numPartitions = metadata.partitionCountForTopic(topic);
@@ -87,7 +93,7 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         }
         list.add(value);
     }
-
+    // 构建 TopicPartition 列表，只需要知道 topic有多少个分区，然后通过一个 for，就可以 构造出来，不需要复杂的动作
     protected static List<TopicPartition> partitions(String topic, int numPartitions) {
         List<TopicPartition> partitions = new ArrayList<>(numPartitions);
         for (int i = 0; i < numPartitions; i++)

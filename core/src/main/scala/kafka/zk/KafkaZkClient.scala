@@ -68,6 +68,7 @@ class KafkaZkClient private (zooKeeperClient: ZooKeeperClient, isSecure: Boolean
    * Create a sequential persistent path. That is, the znode will not be automatically deleted upon client's disconnect
    * and a monotonically increasing number will be appended to its name.
    *
+    *  --flag-- 创建 顺序的持久化节点， 它不会因为节点下线而数据被销毁
    * @param path the path to create (with the monotonically increasing number appended)
    * @param data the znode data
    * @return the created path (including the appended monotonically increasing number)
@@ -1230,7 +1231,7 @@ class KafkaZkClient private (zooKeeperClient: ZooKeeperClient, isSecure: Boolean
   }
 
   /**
-   *
+   * 注册状态变化 处理器
    * @param stateChangeHandler
    */
   def registerStateChangeHandler(stateChangeHandler: StateChangeHandler): Unit = {
@@ -1238,7 +1239,7 @@ class KafkaZkClient private (zooKeeperClient: ZooKeeperClient, isSecure: Boolean
   }
 
   /**
-   *
+   * 取消注册状态变化 处理器
    * @param name
    */
   def unregisterStateChangeHandler(name: String): Unit = {
@@ -1255,6 +1256,8 @@ class KafkaZkClient private (zooKeeperClient: ZooKeeperClient, isSecure: Boolean
 
   /**
    * Get the committed offset for a topic partition and group
+    * --flag-- 获取 消费分组已经提交的 offset
+    *
    * @param group the group we wish to get offset for
    * @param topicPartition the topic partition we wish to get the offset for
    * @return optional long that is Some if there was an offset committed for topic partition, group and None otherwise.

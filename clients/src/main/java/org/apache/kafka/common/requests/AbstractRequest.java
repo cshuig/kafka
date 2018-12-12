@@ -87,6 +87,12 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
         return version;
     }
 
+    /**
+     * 构造一个 Send 对象，包含了一个完整
+     * @param destination
+     * @param header
+     * @return
+     */
     public Send toSend(String destination, RequestHeader header) {
         return new NetworkSend(destination, serialize(header));
     }

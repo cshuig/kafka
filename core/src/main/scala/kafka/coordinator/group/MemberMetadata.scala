@@ -57,14 +57,19 @@ private[group] class MemberMetadata(val memberId: String,
                                     val rebalanceTimeoutMs: Int,
                                     val sessionTimeoutMs: Int,
                                     val protocolType: String,
+                                   // List JoinGroupRequest.ProtocolMetadata 转map得到的
                                     var supportedProtocols: List[(String, Array[Byte])]) {
 
+  // 当前这个消费者分配到的分区
   var assignment: Array[Byte] = Array.empty[Byte]
+  // 加入组的 回调方法, 其实就是服务端处理请求时定义的回调函数： sendResponseCallback
   var awaitingJoinCallback: JoinGroupResult => Unit = null
+  // 同步组的 回调方法, 其实就是服务端处理请求时定义的回调函数： sendResponseCallback
   var awaitingSyncCallback: (Array[Byte], Errors) => Unit = null
+  // 记录了该消费者最近一次发送心跳的时间
   var latestHeartbeat: Long = -1
   var isLeaving: Boolean = false
-
+  // 消费者发送的协议元数据中，协议名称可以有多个，比如 range、roundrobin
   def protocols = supportedProtocols.map(_._1).toSet
 
   /**
@@ -72,7 +77,7 @@ private[group] class MemberMetadata(val memberId: String,
    */
   def metadata(protocol: String): Array[Byte] = {
     supportedProtocols.find(_._1 == protocol) match {
-      case Some((_, metadata)) => metadata
+      case Some((_, metadata)) => metadata // 返回的是 当前成员订阅的topic所有的 List<TopicPartition>
       case None =>
         throw new IllegalArgumentException("Member does not support protocol")
     }

@@ -91,6 +91,7 @@ public class SyncGroupRequest extends AbstractRequest {
     private final String groupId;
     private final int generationId;
     private final String memberId;
+    // 分区分配结果，只有 Leader Consumer 才能执行分配； follower 这个是空的
     private final Map<String, ByteBuffer> groupAssignment;
 
     private SyncGroupRequest(String groupId, int generationId, String memberId,

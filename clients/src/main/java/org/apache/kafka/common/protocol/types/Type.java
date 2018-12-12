@@ -260,12 +260,15 @@ public abstract class Type {
             byte[] bytes = Utils.utf8((String) o);
             if (bytes.length > Short.MAX_VALUE)
                 throw new SchemaException("String length " + bytes.length + " is larger than the maximum string length.");
+            // 由于字符串长度是不确定的，所以写入字符串类型前，需要花2位字节写入当前字符串长度。读取的时候先读取这个长度字段，确定当前字符串的长度
             buffer.putShort((short) bytes.length);
+            // 写入字符串数据
             buffer.put(bytes);
         }
 
         @Override
         public String read(ByteBuffer buffer) {
+            // 先读取出字符串的长度
             short length = buffer.getShort();
             if (length < 0)
                 throw new SchemaException("String length " + length + " cannot be negative");
@@ -370,8 +373,11 @@ public abstract class Type {
             if (size > buffer.remaining())
                 throw new SchemaException("Error reading bytes of size " + size + ", only " + buffer.remaining() + " bytes available");
 
+            // 复制一块区域
             ByteBuffer val = buffer.slice();
+            // 设置最多只能读取 size 数据
             val.limit(size);
+            // 将原缓冲区position往后调整已经读取的字节个数
             buffer.position(buffer.position() + size);
             return val;
         }

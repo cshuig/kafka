@@ -29,12 +29,24 @@ import scala.collection._
 object ControllerEventManager {
   val ControllerEventThreadName = "controller-event-thread"
 }
+
+/**
+  * 这个其实就是一个 生产者 与 消费者 的中间 broker
+  *
+  * @param controllerId
+  * @param rateAndTimeMetrics
+  * @param eventProcessedListener
+  */
 class ControllerEventManager(controllerId: Int, rateAndTimeMetrics: Map[ControllerState, KafkaTimer],
                              eventProcessedListener: ControllerEvent => Unit) {
 
   @volatile private var _state: ControllerState = ControllerState.Idle
   private val putLock = new ReentrantLock()
+  /**
+    *--flag-- 存放的各种各样的控制器事件， 线程会实时监听这个阻塞队列，一旦有事件进来，就消费并执行相应事件
+    */
   private val queue = new LinkedBlockingQueue[ControllerEvent]
+  //--flag-- 控制器事件处理线程
   private val thread = new ControllerEventThread(ControllerEventManager.ControllerEventThreadName)
 
   def state: ControllerState = _state
@@ -65,6 +77,7 @@ class ControllerEventManager(controllerId: Int, rateAndTimeMetrics: Map[Controll
           _state = controllerEvent.state
 
           try {
+            //速率和时间指标
             rateAndTimeMetrics(state).time {
               controllerEvent.process()
             }

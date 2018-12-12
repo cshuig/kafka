@@ -540,13 +540,18 @@ public class Selector implements Selectable, AutoCloseable {
                 if (channel.ready() && key.isWritable()) {
                     Send send = null;
                     try {
+                        /**
+                         *    send不为空，表示完全发送出去，返回发出去的这个Send对象。如果没完全发出去，返回null
+                         * 并不一定一次可以完全发送，可能要调用多次write，才能把一个Send对象完全发出去
+                         * 这是因为write是非阻塞的，不是等到完全发出去，才会返回
+                         */
                         send = channel.write();
                     } catch (Exception e) {
                         sendFailed = true;
                         throw e;
                     }
                     if (send != null) {
-                        //--flag-- 一旦发送完成，就把当前通道的发送对象写入 完成发送的对象列表; 接着由： Processor -> run() -> processCompletedSends() 处理
+                        //--flag-- 一旦发送完成，就把当前通道的发送对象写入到完成发送的对象列表; 接着由： Processor -> run() -> processCompletedSends() 处理
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
@@ -598,7 +603,9 @@ public class Selector implements Selectable, AutoCloseable {
             NetworkReceive networkReceive;
             // --flag-- 一个通道可能有多个记录，需要拆包分阶段读取并封装为一个： NetworkReceive 对象
             while ((networkReceive = channel.read()) != null) {
+                //System.out.println("===networkReceive====");
                 madeReadProgressLastPoll = true;
+                //
                 addToStagedReceives(channel, networkReceive);
             }
             if (channel.isMute()) {
@@ -870,6 +877,10 @@ public class Selector implements Selectable, AutoCloseable {
     /**
      * adds a receive to staged receives
      * 分阶段接收存储聚合在一个 Deque 队列中
+     * 为什么要分阶段：
+     *  在 NetworkClient 中，往下传的是一个完整的 ClientRequest，进到Selector，暂存到channel中的，也是一个完整的Send对象（1个数据包）
+     *  但这个Send对象，交由底层的channel.write(Bytebuffer b)的时候，并不一定一次可以完全发送，可能要调用多次write，才能把一个Send对象完全发出去。这是因为write是非阻塞的，不是等到完全发出去，才会返回
+     *
      */
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))

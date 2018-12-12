@@ -40,6 +40,7 @@ import java.util.Objects;
  * or one of the {@link #builder(ByteBuffer, byte, CompressionType, TimestampType, long)} variants.
  */
 public class MemoryRecords extends AbstractRecords {
+
     private static final Logger log = LoggerFactory.getLogger(MemoryRecords.class);
     public static final MemoryRecords EMPTY = MemoryRecords.readableRecords(ByteBuffer.allocate(0));
 
@@ -82,6 +83,7 @@ public class MemoryRecords extends AbstractRecords {
 
     /**
      * Write all records to the given channel (including partial records).
+     *
      * @param channel The channel to write to
      * @return The number of bytes written
      * @throws IOException For any IO errors writing to the channel
@@ -89,8 +91,10 @@ public class MemoryRecords extends AbstractRecords {
     public int writeFullyTo(GatheringByteChannel channel) throws IOException {
         buffer.mark();
         int written = 0;
-        while (written < sizeInBytes())
+        while (written < sizeInBytes()) {
+            // 写入通道
             written += channel.write(buffer);
+        }
         buffer.reset();
         return written;
     }
@@ -98,6 +102,7 @@ public class MemoryRecords extends AbstractRecords {
     /**
      * The total number of bytes in this message set not including any partial, trailing messages. This
      * may be smaller than what is returned by {@link #sizeInBytes()}.
+     *
      * @return The number of valid bytes
      */
     public int validBytes() {
@@ -306,9 +311,9 @@ public class MemoryRecords extends AbstractRecords {
 
     private void appendRecordToStringBuilder(StringBuilder builder, String recordAsString) {
         builder.append('(')
-            .append("record=")
-            .append(recordAsString)
-            .append(")");
+                .append("record=")
+                .append(recordAsString)
+                .append(")");
     }
 
     @Override
@@ -329,6 +334,7 @@ public class MemoryRecords extends AbstractRecords {
     }
 
     public static abstract class RecordFilter {
+
         public enum BatchRetention {
             DELETE, // Delete the batch without inspecting records
             RETAIN_EMPTY, // Retain the batch even if it is empty
@@ -350,6 +356,7 @@ public class MemoryRecords extends AbstractRecords {
     }
 
     public static class FilterResult {
+
         public final ByteBuffer output;
         public final int messagesRead;
         public final int bytesRead;
@@ -567,7 +574,7 @@ public class MemoryRecords extends AbstractRecords {
     public static MemoryRecords withRecords(byte magic, long initialOffset, CompressionType compressionType,
                                             TimestampType timestampType, long producerId, short producerEpoch,
                                             int baseSequence, int partitionLeaderEpoch, boolean isTransactional,
-                                            SimpleRecord ... records) {
+                                            SimpleRecord... records) {
         if (records.length == 0)
             return MemoryRecords.EMPTY;
         int sizeEstimate = AbstractRecords.estimateSizeInBytes(magic, compressionType, Arrays.asList(records));

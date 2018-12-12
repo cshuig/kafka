@@ -51,6 +51,9 @@ object ControllerZNode {
   }
 }
 
+/**
+  * --flag-- 表示kafka集群中的中央控制器选举次数
+  */
 object ControllerEpochZNode {
   def path = "/controller_epoch"
   def encode(epoch: Int): Array[Byte] = epoch.toString.getBytes(UTF_8)
@@ -89,8 +92,15 @@ object BrokerInfo {
 
 }
 
+/**
+  *
+  * @param broker
+  * @param version
+  * @param jmxPort
+  */
 case class BrokerInfo(broker: Broker, version: Int, jmxPort: Int) {
   val path: String = BrokerIdZNode.path(broker.id)
+  //--flag-- 将当前 brokerInfo 对象转换为 json 格式的字节数组
   def toJsonBytes: Array[Byte] = BrokerIdZNode.encode(this)
 }
 
@@ -104,12 +114,19 @@ object BrokerIdZNode {
   private val ListenerSecurityProtocolMapKey = "listener_security_protocol_map"
   private val TimestampKey = "timestamp"
 
+  /**
+    * broker 在 zk上的节点：/brokers/ids/当前broker.id
+    * @param id
+    * @return
+    */
   def path(id: Int) = s"${BrokerIdsZNode.path}/$id"
 
   /**
    * Encode to JSON bytes.
    *
    * The JSON format includes a top level host and port for compatibility with older clients.
+    *
+    * 将zk上存储的 json 转换为 Array
    */
   def encode(version: Int, host: String, port: Int, advertisedEndpoints: Seq[EndPoint], jmxPort: Int,
              rack: Option[String]): Array[Byte] = {
@@ -540,6 +557,9 @@ object ZkData {
     DelegationTokenAuthZNode.path)
 
   // These are persistent ZK paths that should exist on kafka broker startup.
+  /**
+    * --flag-- 这些是kafka代理启动时应该存在的持久性ZK路径
+    */
   val PersistentZkPaths = Seq(
     ConsumerPathZNode.path, // old consumer path
     BrokerIdsZNode.path,

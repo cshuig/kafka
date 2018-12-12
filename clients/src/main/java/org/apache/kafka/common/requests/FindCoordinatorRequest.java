@@ -37,8 +37,7 @@ public class FindCoordinatorRequest extends AbstractRequest {
     private static final Schema FIND_COORDINATOR_REQUEST_V0 = new Schema(GROUP_ID);
 
     private static final Schema FIND_COORDINATOR_REQUEST_V1 = new Schema(
-            new Field("coordinator_key", STRING, "Id to use for finding the coordinator (for groups, this is the groupId, " +
-                            "for transactional producers, this is the transactional id)"),
+            new Field("coordinator_key", STRING, "Id to use for finding the coordinator (for groups, this is the groupId, " + "for transactional producers, this is the transactional id)"),
             new Field("coordinator_type", INT8, "The type of coordinator to find (0 = group, 1 = transaction)"));
 
     public static Schema[] schemaVersions() {

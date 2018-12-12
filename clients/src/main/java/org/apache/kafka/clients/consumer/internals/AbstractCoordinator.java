@@ -174,6 +174,9 @@ public abstract class AbstractCoordinator implements Closeable {
     /**
      * Perform assignment for the group. This is used by the leader to push state to all the members
      * of the group (e.g. to push partition assignments in the case of the new consumer)
+     *
+     * 执行组的分配。Leader Consumer 使用它将状态推送到组的所有成员*（例如，在新消费者的情况下推送分区分配）
+     *
      * @param leaderId The id of the leader (which is this member)
      * @param allMemberMetadata Metadata from all members of the group
      * @return A map from each member to their state assignment
@@ -452,6 +455,15 @@ public abstract class AbstractCoordinator implements Closeable {
                 .compose(new JoinGroupResponseHandler());
     }
 
+    /**
+     * 加入组响应处理器
+     *      1、Leader Consumer 会收到组内的所有消费者订阅信息
+     *      2、普通消费者第一次收到空的响应，同时立即发送 同步组请求
+     *      3、如果加入组响应 错误， 就不能继续发送同步组请求，而应该对加入组的异步请求调用 raise() 方法，
+     *  表示 加入组 的异步请求有异常。
+     *      4、客户端轮询完成，但异步请求没有成功，就不会调用 onJoinComplete() 回调方法,
+     *   消费者需要重新发送 加入组请求
+     */
     private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
         @Override
         public void handle(JoinGroupResponse joinResponse, RequestFuture<ByteBuffer> future) {
@@ -469,8 +481,10 @@ public abstract class AbstractCoordinator implements Closeable {
                         AbstractCoordinator.this.generation = new Generation(joinResponse.generationId(),
                                 joinResponse.memberId(), joinResponse.groupProtocol());
                         if (joinResponse.isLeader()) {
+                            // Leader Consumer 会收到组内的所有消费者订阅信息
                             onJoinLeader(joinResponse).chain(future);
                         } else {
+                            // 普通消费者第一次收到空的响应，同时立即发送 同步组请求
                             onJoinFollower().chain(future);
                         }
                     }
@@ -799,6 +813,11 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
+    /**
+     * 协调器相应处理器，本质上是一个用于组合模式的 异步请求适配器
+     * @param <R>
+     * @param <T>
+     */
     protected abstract class CoordinatorResponseHandler<R, T> extends RequestFutureAdapter<ClientResponse, T> {
         protected ClientResponse response;
 

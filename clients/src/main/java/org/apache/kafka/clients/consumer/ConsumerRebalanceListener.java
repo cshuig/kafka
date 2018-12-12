@@ -16,9 +16,9 @@
  */
 package org.apache.kafka.clients.consumer;
 
-import java.util.Collection;
-
 import org.apache.kafka.common.TopicPartition;
+
+import java.util.Collection;
 
 /**
  * A callback interface that the user can implement to trigger custom actions when the set of partitions assigned to the
@@ -84,13 +84,7 @@ public interface ConsumerRebalanceListener {
      * stops fetching data. It is recommended that offsets should be committed in this callback to either Kafka or a
      * custom offset store to prevent duplicate data.
      * <p>
-     * For examples on usage of this API, see Usage Examples section of {@link KafkaConsumer KafkaConsumer}
-     * <p>
-     * <b>NOTE:</b> This method is only called before rebalances. It is not called prior to {@link KafkaConsumer#close()}.
-     * <p>
-     * It is common for the revocation callback to use the consumer instance in order to commit offsets. It is possible
-     * for a {@link org.apache.kafka.common.errors.WakeupException} or {@link org.apache.kafka.common.errors.InterruptException}
-     * to be raised from one these nested invocations. In this case, the exception will be propagated to the current
+     * For examples on usage of this API, see Usage Examples section of {@link KafkaConsumer KafkaConsumer} <p> <b>NOTE:</b> This method is only called before rebalances. It is not called prior to {@link KafkaConsumer#close()}. <p> It is common for the revocation callback to use the consumer instance in order to commit offsets. It is possible for a {@link org.apache.kafka.common.errors.WakeupException} or {@link org.apache.kafka.common.errors.InterruptException} to be raised from one these nested invocations. In this case, the exception will be propagated to the current
      * invocation of {@link KafkaConsumer#poll(long)} in which this callback is being executed. This means it is not
      * necessary to catch these exceptions and re-attempt to wakeup or interrupt the consumer thread.
      *

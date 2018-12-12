@@ -20,6 +20,10 @@ import java.nio.ByteBuffer;
 
 /**
  * A size delimited Send that consists of a 4 byte network-ordered size N followed by N bytes of content
+ *
+ * 以大小分隔的发送，
+ * 包含4字节网络：此条消息的总长度
+ * 后跟N个字节内容
  */
 public class NetworkSend extends ByteBufferSend {
 
@@ -31,6 +35,11 @@ public class NetworkSend extends ByteBufferSend {
         return new ByteBuffer[] {sizeBuffer(buffer.remaining()), buffer};
     }
 
+    /**
+     * 构造一个4个字节的，存储消息总长度的 缓冲区
+     * @param size
+     * @return
+     */
     private static ByteBuffer sizeBuffer(int size) {
         ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
         sizeBuffer.putInt(size);

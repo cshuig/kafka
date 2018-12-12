@@ -64,6 +64,7 @@ abstract class DelayedOperation(override val delayMs: Long,
    * true, others will still return false
    */
   def forceComplete(): Boolean = {
+    logger.info("延迟任务超时，强制完成")
     if (completed.compareAndSet(false, true)) {
       // cancel the timeout timer
       cancel()
@@ -140,6 +141,7 @@ abstract class DelayedOperation(override val delayMs: Long,
    * run() method defines a task that is executed on timeout
    */
   override def run(): Unit = {
+
     if (forceComplete())
       onExpiration()
   }
@@ -215,6 +217,7 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
    * @return true iff the delayed operations can be completed by the caller
    */
   def tryCompleteElseWatch(operation: T, watchKeys: Seq[Any]): Boolean = {
+    logger.info("tryCompleteElseWatch()")
     assert(watchKeys.nonEmpty, "The watch key list can't be empty")
 
     // The cost of tryComplete() is typically proportional to the number of keys. Calling
@@ -230,17 +233,22 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
     // At this point the only thread that can attempt this operation is this current thread
     // Hence it is safe to tryComplete() without a lock
     var isCompletedByMe = operation.tryComplete()
+    logger.info("operation.tryComplete() = {}", isCompletedByMe);
     if (isCompletedByMe)
       return true
 
     var watchCreated = false
     for(key <- watchKeys) {
       // If the operation is already completed, stop adding it to the rest of the watcher list.
-      if (operation.isCompleted)
+      if (operation.isCompleted) {
+        logger.info("operation.isCompleted = true");
         return false
+      }
+
       watchForOperation(key, operation)
 
       if (!watchCreated) {
+        logger.info("watchCreated = true");
         watchCreated = true
         estimatedTotalOperations.incrementAndGet()
       }
@@ -314,6 +322,7 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   private def watchForOperation(key: Any, operation: T) {
     inReadLock(removeWatchersLock) {
       val watcher = watchersForKey.getAndMaybePut(key)
+      logger.info("新增延迟操作，key={} watchers#ConcurrentLinkedQueue中", key)
       watcher.watch(operation)
     }
   }
@@ -413,6 +422,7 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   }
 
   def advanceClock(timeoutMs: Long) {
+    logger.info("少时诵诗书所所所所所所所所所所所所所所所所所所")
     timeoutTimer.advanceClock(timeoutMs)
 
     // Trigger a purge if the number of completed but still being watched operations is larger than
@@ -432,7 +442,7 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   /**
    * A background reaper to expire delayed operations that have timed out
    */
-  private class ExpiredOperationReaper extends ShutdownableThread(
+    private class ExpiredOperationReaper extends ShutdownableThread(
     "ExpirationReaper-%d-%s".format(brokerId, purgatoryName),
     false) {
 

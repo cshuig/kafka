@@ -51,7 +51,9 @@ object OffsetConfig {
   val DefaultMaxMetadataSize = 4096
   val DefaultLoadBufferSize = 5*1024*1024
   val DefaultOffsetRetentionMs = 24*60*60*1000L
+  // 10m
   val DefaultOffsetsRetentionCheckIntervalMs = 600000L
+  // 存储offset的分区默认个数：分区名字为： __consumer_offsets
   val DefaultOffsetsTopicNumPartitions = 50
   val DefaultOffsetsTopicSegmentBytes = 100*1024*1024
   val DefaultOffsetsTopicReplicationFactor = 3.toShort

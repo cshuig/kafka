@@ -22,10 +22,13 @@ import java.util.List;
 public class BasePartitionState {
 
     public final int controllerEpoch;
+    // 副本 Leader 所在的 brokerId
     public final int leader;
     public final int leaderEpoch;
+    // isr 所在的 BrokerId 集合
     public final List<Integer> isr;
     public final int zkVersion;
+    // 所有 副本 所在的 brokerId 集合
     public final List<Integer> replicas;
 
     BasePartitionState(int controllerEpoch, int leader, int leaderEpoch, List<Integer> isr, int zkVersion, List<Integer> replicas) {

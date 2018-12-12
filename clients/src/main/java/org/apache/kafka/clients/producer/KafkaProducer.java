@@ -925,6 +925,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     /**
      * Validate that the record size isn't too large
+     *  每个请求的数据量大小是有限制的， 这里是验证大小是否在限制范围内
      */
     private void ensureValidRecordSize(int size) {
         if (size > this.maxRequestSize)
