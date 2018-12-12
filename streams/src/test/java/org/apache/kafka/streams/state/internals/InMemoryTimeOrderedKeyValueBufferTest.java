@@ -14,27 +14,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.kafka.streams.state.internals;
 
-package org.apache.kafka.streams.kstream.internals;
+import org.junit.Test;
 
-import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.streams.kstream.Grouped;
+public class InMemoryTimeOrderedKeyValueBufferTest {
 
-public class GroupedInternal<K, V> extends Grouped<K, V> {
-
-    public GroupedInternal(final Grouped<K, V> grouped) {
-        super(grouped);
+    @Test
+    public void bufferShouldAllowCacheEnablement() {
+        new InMemoryTimeOrderedKeyValueBuffer.Builder(null).withCachingEnabled();
     }
 
-    public Serde<K> keySerde() {
-        return keySerde;
-    }
-
-    public Serde<V> valueSerde() {
-        return valueSerde;
-    }
-
-    public String name() {
-        return name;
+    @Test
+    public void bufferShouldAllowCacheDisablement() {
+        new InMemoryTimeOrderedKeyValueBuffer.Builder(null).withCachingDisabled();
     }
 }

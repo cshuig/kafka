@@ -351,7 +351,8 @@ class Partition(val topicPartition: TopicPartition,
       leaderEpochStartOffsetOpt = None
       removePartitionMetrics()
       logManager.asyncDelete(topicPartition)
-      logManager.asyncDelete(topicPartition, isFuture = true)
+      if (logManager.getLog(topicPartition, isFuture = true).isDefined)
+        logManager.asyncDelete(topicPartition, isFuture = true)
     }
   }
 
@@ -738,8 +739,6 @@ class Partition(val topicPartition: TopicPartition,
           }
 
           val info = log.appendAsLeader(records, leaderEpoch = this.leaderEpoch, isFromClient)
-          // probably unblock some follower fetch requests since log end offset has been updated
-          replicaManager.tryCompleteDelayedFetch(TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
 
@@ -752,6 +751,10 @@ class Partition(val topicPartition: TopicPartition,
     // some delayed operations may be unblocked after HW changed
     if (leaderHWIncremented)
       tryCompleteDelayedRequests()
+    else {
+      // probably unblock some follower fetch requests since log end offset has been updated
+      replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(topicPartition))
+    }
 
     info
   }

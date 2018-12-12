@@ -31,8 +31,7 @@ import kafka.common.OffsetAndMetadata
 import kafka.controller.KafkaController
 import kafka.coordinator.group.{GroupCoordinator, JoinGroupResult}
 import kafka.coordinator.transaction.{InitProducerIdResult, TransactionCoordinator}
-import kafka.log.{Log, LogManager, TimestampOffset}
-import kafka.message.{CompressionCodec, NoCompressionCodec, ZStdCompressionCodec}
+import kafka.message.ZStdCompressionCodec
 import kafka.network.RequestChannel
 import kafka.security.SecurityUtils
 import kafka.security.auth.{Resource, _}
@@ -47,8 +46,9 @@ import org.apache.kafka.common.internals.Topic.{GROUP_METADATA_TOPIC_NAME, TRANS
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.{ListenerName, Send}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
-import org.apache.kafka.common.record.{BaseRecords, ControlRecordType, EndTransactionMarker, LazyDownConversionRecords, MemoryRecords, MultiRecordsSend, RecordBatch, RecordConversionStats, Records}
+import org.apache.kafka.common.record._
 import org.apache.kafka.common.requests.CreateAclsResponse.AclCreationResponse
+import org.apache.kafka.common.requests.CreateTopicsRequest.TopicDetails
 import org.apache.kafka.common.requests.DeleteAclsResponse.{AclDeletionResult, AclFilterResponse}
 import org.apache.kafka.common.requests.DescribeLogDirsResponse.LogDirInfo
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
@@ -64,7 +64,6 @@ import scala.collection.JavaConverters._
 import scala.collection._
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
-import org.apache.kafka.common.requests.CreateTopicsRequest.TopicDetails
 
 /**
  * Logic to handle the various Kafka requests
@@ -392,6 +391,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     val unauthorizedTopicResponses = mutable.Map[TopicPartition, PartitionResponse]()
     val nonExistingTopicResponses = mutable.Map[TopicPartition, PartitionResponse]()
+    val invalidRequestResponses = mutable.Map[TopicPartition, PartitionResponse]()
     val authorizedRequestInfo = mutable.Map[TopicPartition, MemoryRecords]()
 
     for ((topicPartition, memoryRecords) <- produceRequest.partitionRecordsOrFail.asScala) {
@@ -400,12 +400,18 @@ class KafkaApis(val requestChannel: RequestChannel,
       else if (!metadataCache.contains(topicPartition))
         nonExistingTopicResponses += topicPartition -> new PartitionResponse(Errors.UNKNOWN_TOPIC_OR_PARTITION)
       else
-        authorizedRequestInfo += (topicPartition -> memoryRecords)
+        try {
+          ProduceRequest.validateRecords(request.header.apiVersion(), memoryRecords)
+          authorizedRequestInfo += (topicPartition -> memoryRecords)
+        } catch {
+          case e: ApiException =>
+            invalidRequestResponses += topicPartition -> new PartitionResponse(Errors.forException(e))
+        }
     }
 
     // the callback for sending a produce response
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
-      val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses
+      val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses ++ invalidRequestResponses
       var errorInResponse = false
 
       mergedResponseStatus.foreach { case (topicPartition, status) =>
@@ -574,7 +580,7 @@ class KafkaApis(val requestChannel: RequestChannel,
                 // down-conversion always guarantees that at least one batch of messages is down-converted and sent out to the
                 // client.
                 new FetchResponse.PartitionData[BaseRecords](partitionData.error, partitionData.highWatermark,
-                  FetchResponse.INVALID_LAST_STABLE_OFFSET, partitionData.logStartOffset, partitionData.abortedTransactions,
+                  partitionData.lastStableOffset, partitionData.logStartOffset, partitionData.abortedTransactions,
                   new LazyDownConversionRecords(tp, unconvertedRecords, magic, fetchContext.getFetchOffset(tp).get, time))
               } catch {
                 case e: UnsupportedCompressionTypeException =>
@@ -583,7 +589,7 @@ class KafkaApis(val requestChannel: RequestChannel,
               }
             }
           case None => new FetchResponse.PartitionData[BaseRecords](partitionData.error, partitionData.highWatermark,
-            FetchResponse.INVALID_LAST_STABLE_OFFSET, partitionData.logStartOffset, partitionData.abortedTransactions,
+            partitionData.lastStableOffset, partitionData.logStartOffset, partitionData.abortedTransactions,
             unconvertedRecords)
         }
       }

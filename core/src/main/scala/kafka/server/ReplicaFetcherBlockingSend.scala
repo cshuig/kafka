@@ -30,11 +30,12 @@ import org.apache.kafka.common.Node
 import org.apache.kafka.common.requests.AbstractRequest.Builder
 
 import scala.collection.JavaConverters._
-import org.apache.kafka.common.config.ClientDnsLookup
 
 trait BlockingSend {
 
   def sendRequest(requestBuilder: AbstractRequest.Builder[_ <: AbstractRequest]): ClientResponse
+
+  def initiateClose()
 
   def close()
 }
@@ -103,6 +104,10 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
         networkClient.close(sourceBroker.id.toString)
         throw e
     }
+  }
+
+  override def initiateClose(): Unit = {
+    networkClient.initiateClose()
   }
 
   def close(): Unit = {
