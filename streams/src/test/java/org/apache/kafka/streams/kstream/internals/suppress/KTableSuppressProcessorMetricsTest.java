@@ -19,12 +19,15 @@ package org.apache.kafka.streams.kstream.internals.suppress;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.utils.SystemTime;
+import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Suppressed;
 import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.kstream.internals.KTableImpl;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.ProcessorNode;
 import org.apache.kafka.streams.state.internals.InMemoryTimeOrderedKeyValueBuffer;
@@ -55,7 +58,7 @@ public class KTableSuppressProcessorMetricsTest {
     private final MetricName evictionTotalMetric0100To24 = new MetricName(
         "suppression-emit-total",
         "stream-processor-node-metrics",
-        "The total number of occurrence of suppression-emit operations.",
+        "The total number of emitted records from the suppression buffer",
         mkMap(
             mkEntry("client-id", threadId),
             mkEntry("task-id", TASK_ID.toString()),
@@ -66,7 +69,7 @@ public class KTableSuppressProcessorMetricsTest {
     private final MetricName evictionTotalMetricLatest = new MetricName(
         "suppression-emit-total",
         "stream-processor-node-metrics",
-        "The total number of occurrence of suppression-emit operations.",
+        "The total number of emitted records from the suppression buffer",
         mkMap(
             mkEntry("thread-id", threadId),
             mkEntry("task-id", TASK_ID.toString()),
@@ -77,7 +80,7 @@ public class KTableSuppressProcessorMetricsTest {
     private final MetricName evictionRateMetric0100To24 = new MetricName(
         "suppression-emit-rate",
         "stream-processor-node-metrics",
-        "The average number of occurrence of suppression-emit operation per second.",
+        "The average number of emitted records from the suppression buffer per second",
         mkMap(
             mkEntry("client-id", threadId),
             mkEntry("task-id", TASK_ID.toString()),
@@ -88,7 +91,7 @@ public class KTableSuppressProcessorMetricsTest {
     private final MetricName evictionRateMetricLatest = new MetricName(
         "suppression-emit-rate",
         "stream-processor-node-metrics",
-        "The average number of occurrence of suppression-emit operation per second.",
+        "The average number of emitted records from the suppression buffer per second",
         mkMap(
             mkEntry("thread-id", threadId),
             mkEntry("task-id", TASK_ID.toString()),
@@ -106,6 +109,7 @@ public class KTableSuppressProcessorMetricsTest {
             mkEntry("buffer-id", "test-store")
         )
     );
+
     private final MetricName bufferSizeAvgMetricLatest = new MetricName(
         "suppression-buffer-size-avg",
         "stream-state-metrics",
@@ -236,9 +240,11 @@ public class KTableSuppressProcessorMetricsTest {
         streamsConfig.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
         final MockInternalProcessorContext context =
             new MockInternalProcessorContext(streamsConfig, TASK_ID, TestUtils.tempDirectory());
+        final Time time = new SystemTime();
         context.setCurrentNode(new ProcessorNode("testNode"));
+        context.setSystemTimeMs(time.milliseconds());
 
-        buffer.init(context, buffer);
+        buffer.init((StateStoreContext) context, buffer);
         processor.init(context);
 
         final long timestamp = 100L;
@@ -300,6 +306,5 @@ public class KTableSuppressProcessorMetricsTest {
                                          final Matcher<T> matcher) {
         assertThat(metrics.get(metricName).metricName().description(), is(metricName.description()));
         assertThat((T) metrics.get(metricName).metricValue(), matcher);
-
     }
 }

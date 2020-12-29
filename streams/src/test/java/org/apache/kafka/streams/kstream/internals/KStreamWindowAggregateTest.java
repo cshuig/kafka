@@ -140,7 +140,7 @@ public class KStreamWindowAggregateTest {
                 new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2+2+2+3",  13)
 
                 ),
-            supplier.theCapturedProcessor().processed
+            supplier.theCapturedProcessor().processed()
         );
     }
 
@@ -189,8 +189,8 @@ public class KStreamWindowAggregateTest {
                 new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1",  9),
                 new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1",  9)
             );
-            processors.get(1).checkAndClearProcessResult(new KeyValueTimestamp[0]);
-            processors.get(2).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(1).checkAndClearProcessResult();
+            processors.get(2).checkAndClearProcessResult();
 
             inputTopic1.pipeInput("A", "1", 5L);
             inputTopic1.pipeInput("B", "2", 6L);
@@ -210,8 +210,8 @@ public class KStreamWindowAggregateTest {
                 new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+3+3",  9),
                 new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(5, 15)),  "0+3",  9)
             );
-            processors.get(1).checkAndClearProcessResult(new KeyValueTimestamp[0]);
-            processors.get(2).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(1).checkAndClearProcessResult();
+            processors.get(2).checkAndClearProcessResult();
 
             inputTopic2.pipeInput("A", "a", 0L);
             inputTopic2.pipeInput("B", "b", 1L);
@@ -219,7 +219,7 @@ public class KStreamWindowAggregateTest {
             inputTopic2.pipeInput("D", "d", 20L);
             inputTopic2.pipeInput("A", "a", 20L);
 
-            processors.get(0).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(0).checkAndClearProcessResult();
             processors.get(1).checkAndClearProcessResult(
                 new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+a",  0),
                 new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+b",  1),
@@ -240,7 +240,7 @@ public class KStreamWindowAggregateTest {
             inputTopic2.pipeInput("D", "d", 18L);
             inputTopic2.pipeInput("A", "a", 21L);
 
-            processors.get(0).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(0).checkAndClearProcessResult();
             processors.get(1).checkAndClearProcessResult(
                 new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+a+a",  5),
                 new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+a",  5),
@@ -288,13 +288,14 @@ public class KStreamWindowAggregateTest {
                 Materialized.<String, String, WindowStore<Bytes, byte[]>>as("topic1-Canonicalized").withValueSerde(Serdes.String())
             );
 
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
         props.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(KStreamWindowAggregate.class);
+             final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+
             final TestInputTopic<String, String> inputTopic =
                 driver.createInputTopic(topic, new StringSerializer(), new StringSerializer());
             inputTopic.pipeInput(null, "1");
-            LogCaptureAppender.unregister(appender);
 
             if (StreamsConfig.METRICS_0100_TO_24.equals(builtInMetricsVersion)) {
                 assertEquals(
@@ -306,9 +307,18 @@ public class KStreamWindowAggregateTest {
         }
     }
 
-    @Deprecated // testing deprecated functionality (behavior of until)
     @Test
-    public void shouldLogAndMeterWhenSkippingExpiredWindow() {
+    public void shouldLogAndMeterWhenSkippingExpiredWindowWithBuiltInMetricsVersionLatest() {
+        shouldLogAndMeterWhenSkippingExpiredWindow(StreamsConfig.METRICS_LATEST);
+    }
+
+    @Test
+    public void shouldLogAndMeterWhenSkippingExpiredWindowWithBuiltInMetricsVersion0100To24() {
+        shouldLogAndMeterWhenSkippingExpiredWindow(StreamsConfig.METRICS_0100_TO_24);
+    }
+
+    @Deprecated // testing deprecated functionality (behavior of until)
+    private void shouldLogAndMeterWhenSkippingExpiredWindow(final String builtInMetricsVersion) {
         final StreamsBuilder builder = new StreamsBuilder();
         final String topic = "topic";
 
@@ -324,9 +334,11 @@ public class KStreamWindowAggregateTest {
                .map((key, value) -> new KeyValue<>(key.toString(), value))
                .to("output");
 
-        LogCaptureAppender.setClassLoggerToDebug(KStreamWindowAggregate.class);
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+        props.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
+
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(KStreamWindowAggregate.class);
+             final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+
             final TestInputTopic<String, String> inputTopic =
                     driver.createInputTopic(topic, new StringSerializer(), new StringSerializer());
             inputTopic.pipeInput("k", "100", 100L);
@@ -337,10 +349,10 @@ public class KStreamWindowAggregateTest {
             inputTopic.pipeInput("k", "4", 4L);
             inputTopic.pipeInput("k", "5", 5L);
             inputTopic.pipeInput("k", "6", 6L);
-            LogCaptureAppender.unregister(appender);
 
             assertLatenessMetrics(
                 driver,
+                builtInMetricsVersion,
                 is(7.0), // how many events get dropped
                 is(100.0), // k:0 is 100ms late, since its time is 0, but it arrives at stream time 100.
                 is(84.875) // (0 + 100 + 99 + 98 + 97 + 96 + 95 + 94) / 8
@@ -359,16 +371,25 @@ public class KStreamWindowAggregateTest {
             final TestOutputTopic<String, String> outputTopic =
                     driver.createOutputTopic("output", new StringDeserializer(), new StringDeserializer());
 
-            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<String, String>("[k@95/105]", "+100", null, 100L)));
-            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<String, String>("[k@100/110]", "+100", null, 100L)));
-            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<String, String>("[k@5/15]", "+5", null, 5L)));
-            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<String, String>("[k@5/15]", "+5+6", null, 6L)));
+            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<>("[k@95/105]", "+100", null, 100L)));
+            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<>("[k@100/110]", "+100", null, 100L)));
+            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<>("[k@5/15]", "+5", null, 5L)));
+            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<>("[k@5/15]", "+5+6", null, 6L)));
             assertTrue(outputTopic.isEmpty());
         }
     }
 
     @Test
-    public void shouldLogAndMeterWhenSkippingExpiredWindowByGrace() {
+    public void shouldLogAndMeterWhenSkippingExpiredWindowByGraceWithBuiltInMetricsVersionLatest() {
+        shouldLogAndMeterWhenSkippingExpiredWindowByGrace(StreamsConfig.METRICS_LATEST);
+    }
+
+    @Test
+    public void shouldLogAndMeterWhenSkippingExpiredWindowByGraceWithBuiltInMetricsVersion0100To24() {
+        shouldLogAndMeterWhenSkippingExpiredWindowByGrace(StreamsConfig.METRICS_0100_TO_24);
+    }
+
+    private void shouldLogAndMeterWhenSkippingExpiredWindowByGrace(final String builtInMetricsVersion) {
         final StreamsBuilder builder = new StreamsBuilder();
         final String topic = "topic";
 
@@ -384,9 +405,11 @@ public class KStreamWindowAggregateTest {
                .map((key, value) -> new KeyValue<>(key.toString(), value))
                .to("output");
 
-        LogCaptureAppender.setClassLoggerToDebug(KStreamWindowAggregate.class);
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+        props.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
+
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(KStreamWindowAggregate.class);
+             final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+
             final TestInputTopic<String, String> inputTopic =
                     driver.createInputTopic(topic, new StringSerializer(), new StringSerializer());
             inputTopic.pipeInput("k", "100", 200L);
@@ -397,9 +420,8 @@ public class KStreamWindowAggregateTest {
             inputTopic.pipeInput("k", "4", 104L);
             inputTopic.pipeInput("k", "5", 105L);
             inputTopic.pipeInput("k", "6", 6L);
-            LogCaptureAppender.unregister(appender);
 
-            assertLatenessMetrics(driver, is(7.0), is(194.0), is(97.375));
+            assertLatenessMetrics(driver, builtInMetricsVersion, is(7.0), is(194.0), is(97.375));
 
             assertThat(appender.getMessages(), hasItems(
                 "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[1] timestamp=[100] window=[100,110) expiration=[110] streamTime=[200]",
@@ -413,59 +435,106 @@ public class KStreamWindowAggregateTest {
 
             final TestOutputTopic<String, String> outputTopic =
                     driver.createOutputTopic("output", new StringDeserializer(), new StringDeserializer());
-            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<String, String>("[k@200/210]", "+100", null, 200L)));
+            assertThat(outputTopic.readRecord(), equalTo(new TestRecord<>("[k@200/210]", "+100", null, 200L)));
             assertTrue(outputTopic.isEmpty());
         }
     }
 
     private void assertLatenessMetrics(final TopologyTestDriver driver,
+                                       final String builtInMetricsVersion,
                                        final Matcher<Object> dropTotal,
                                        final Matcher<Object> maxLateness,
                                        final Matcher<Object> avgLateness) {
-        final MetricName dropMetric = new MetricName(
-            "late-record-drop-total",
-            "stream-processor-node-metrics",
-            "The total number of occurrence of late-record-drop operations.",
-            mkMap(
-                mkEntry("thread-id", threadId),
-                mkEntry("task-id", "0_0"),
-                mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
-            )
-        );
-        assertThat(driver.metrics().get(dropMetric).metricValue(), dropTotal);
 
-        final MetricName dropRate = new MetricName(
-            "late-record-drop-rate",
-            "stream-processor-node-metrics",
-            "The average number of occurrence of late-record-drop operations.",
-            mkMap(
-                mkEntry("thread-id", threadId),
-                mkEntry("task-id", "0_0"),
-                mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
-            )
-        );
-        assertThat(driver.metrics().get(dropRate).metricValue(), not(0.0));
+        final MetricName dropTotalMetric;
+        final MetricName dropRateMetric;
+        final MetricName latenessMaxMetric;
+        final MetricName latenessAvgMetric;
+        if (StreamsConfig.METRICS_0100_TO_24.equals(builtInMetricsVersion)) {
+            dropTotalMetric = new MetricName(
+                "late-record-drop-total",
+                "stream-processor-node-metrics",
+                "The total number of dropped late records",
+                mkMap(
+                    mkEntry("client-id", threadId),
+                    mkEntry("task-id", "0_0"),
+                    mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
+                )
+            );
+            dropRateMetric = new MetricName(
+                "late-record-drop-rate",
+                "stream-processor-node-metrics",
+                "The average number of dropped late records per second",
+                mkMap(
+                    mkEntry("client-id", threadId),
+                    mkEntry("task-id", "0_0"),
+                    mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
+                )
+            );
+            latenessMaxMetric = new MetricName(
+                "record-lateness-max",
+                "stream-task-metrics",
+                "The observed maximum lateness of records in milliseconds, measured by comparing the record "
+                    + "timestamp with the current stream time",
+                mkMap(
+                    mkEntry("client-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
+            latenessAvgMetric = new MetricName(
+                "record-lateness-avg",
+                "stream-task-metrics",
+                "The observed average lateness of records in milliseconds, measured by comparing the record "
+                    + "timestamp with the current stream time",
+                mkMap(
+                    mkEntry("client-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
+        } else {
+            dropTotalMetric = new MetricName(
+                "dropped-records-total",
+                "stream-task-metrics",
+                "The total number of dropped records",
+                mkMap(
+                    mkEntry("thread-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
+            dropRateMetric = new MetricName(
+                "dropped-records-rate",
+                "stream-task-metrics",
+                "The average number of dropped records per second",
+                mkMap(
+                    mkEntry("thread-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
+            latenessMaxMetric = new MetricName(
+                "record-lateness-max",
+                "stream-task-metrics",
+                "The observed maximum lateness of records in milliseconds, measured by comparing the record "
+                    + "timestamp with the current stream time",
+                mkMap(
+                    mkEntry("thread-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
+            latenessAvgMetric = new MetricName(
+                "record-lateness-avg",
+                "stream-task-metrics",
+                "The observed average lateness of records in milliseconds, measured by comparing the record "
+                    + "timestamp with the current stream time",
+                mkMap(
+                    mkEntry("thread-id", threadId),
+                    mkEntry("task-id", "0_0")
+                )
+            );
 
-        final MetricName latenessMaxMetric = new MetricName(
-            "record-lateness-max",
-            "stream-task-metrics",
-            "The max observed lateness of records.",
-            mkMap(
-                mkEntry("thread-id", threadId),
-                mkEntry("task-id", "0_0")
-            )
-        );
+        }
+        assertThat(driver.metrics().get(dropTotalMetric).metricValue(), dropTotal);
+        assertThat(driver.metrics().get(dropRateMetric).metricValue(), not(0.0));
         assertThat(driver.metrics().get(latenessMaxMetric).metricValue(), maxLateness);
-
-        final MetricName latenessAvgMetric = new MetricName(
-            "record-lateness-avg",
-            "stream-task-metrics",
-            "The average observed lateness of records.",
-            mkMap(
-                mkEntry("thread-id", threadId),
-                mkEntry("task-id", "0_0")
-            )
-        );
         assertThat(driver.metrics().get(latenessAvgMetric).metricValue(), avgLateness);
     }
 

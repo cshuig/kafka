@@ -16,9 +16,9 @@
  */
 package org.apache.kafka.test;
 
+import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.network.ChannelState;
 import org.apache.kafka.common.network.NetworkReceive;
-import org.apache.kafka.common.network.NetworkSend;
 import org.apache.kafka.common.network.Selectable;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.requests.ByteBufferChannel;
@@ -80,6 +80,18 @@ public class MockSelector implements Selectable {
     }
 
     /**
+     * Since MockSelector.connect will always succeed and add the
+     * connection id to the Set connected, we can only simulate
+     * that the connection is still pending by remove the connection
+     * id from the Set connected
+     *
+     * @param id connection id
+     */
+    public void serverConnectionBlocked(String id) {
+        this.connected.remove(id);
+    }
+
+    /**
      * Simulate a server disconnect. This id will be present in {@link #disconnected()} on
      * the next {@link #poll(long)}.
      */
@@ -88,13 +100,15 @@ public class MockSelector implements Selectable {
         close(id);
     }
 
+    public void serverAuthenticationFailed(String id) {
+        ChannelState authFailed = new ChannelState(ChannelState.State.AUTHENTICATION_FAILED,
+                new AuthenticationException("Authentication failed"), null);
+        this.disconnected.put(id, authFailed);
+        close(id);
+    }
+
     private void removeSendsForNode(String id, Collection<Send> sends) {
-        Iterator<Send> iter = sends.iterator();
-        while (iter.hasNext()) {
-            Send send = iter.next();
-            if (id.equals(send.destination()))
-                iter.remove();
-        }
+        sends.removeIf(send -> id.equals(send.destination()));
     }
 
     public void clear() {
@@ -151,10 +165,6 @@ public class MockSelector implements Selectable {
     @Override
     public List<Send> completedSends() {
         return completedSends;
-    }
-
-    public void completeSend(NetworkSend send) {
-        this.completedSends.add(send);
     }
 
     public List<ByteBufferChannel> completedSendBuffers() {

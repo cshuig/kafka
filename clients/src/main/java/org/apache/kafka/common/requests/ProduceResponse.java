@@ -56,7 +56,7 @@ public class ProduceResponse extends AbstractResponse {
      *
      * {@link Errors#CORRUPT_MESSAGE}
      * {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
-     * {@link Errors#NOT_LEADER_FOR_PARTITION}
+     * {@link Errors#NOT_LEADER_OR_FOLLOWER}
      * {@link Errors#MESSAGE_TOO_LARGE}
      * {@link Errors#INVALID_TOPIC_EXCEPTION}
      * {@link Errors#RECORD_LIST_TOO_LARGE}
@@ -126,7 +126,7 @@ public class ProduceResponse extends AbstractResponse {
     /**
      * The body of PRODUCE_RESPONSE_V4 is the same as PRODUCE_RESPONSE_V3.
      * The version number is bumped up to indicate that the client supports KafkaStorageException.
-     * The KafkaStorageException will be translated to NotLeaderForPartitionException in the response if version <= 3
+     * The KafkaStorageException will be translated to NotLeaderOrFollowerException in the response if version <= 3
      */
     private static final Schema PRODUCE_RESPONSE_V4 = PRODUCE_RESPONSE_V3;
 
@@ -222,7 +222,8 @@ public class ProduceResponse extends AbstractResponse {
                 int partition = partRespStruct.get(PARTITION_ID);
                 Errors error = Errors.forCode(partRespStruct.get(ERROR_CODE));
                 long offset = partRespStruct.getLong(BASE_OFFSET_KEY_NAME);
-                long logAppendTime = partRespStruct.getLong(LOG_APPEND_TIME_KEY_NAME);
+                long logAppendTime = partRespStruct.hasField(LOG_APPEND_TIME_KEY_NAME) ?
+                        partRespStruct.getLong(LOG_APPEND_TIME_KEY_NAME) : RecordBatch.NO_TIMESTAMP;
                 long logStartOffset = partRespStruct.getOrElse(LOG_START_OFFSET_FIELD, INVALID_OFFSET);
 
                 List<RecordError> recordErrors = Collections.emptyList();
@@ -264,9 +265,9 @@ public class ProduceResponse extends AbstractResponse {
                 // If producer sends ProduceRequest V3 or earlier, the client library is not guaranteed to recognize the error code
                 // for KafkaStorageException. In this case the client library will translate KafkaStorageException to
                 // UnknownServerException which is not retriable. We can ensure that producer will update metadata and retry
-                // by converting the KafkaStorageException to NotLeaderForPartitionException in the response if ProduceRequest version <= 3
+                // by converting the KafkaStorageException to NotLeaderOrFollowerException in the response if ProduceRequest version <= 3
                 if (errorCode == Errors.KAFKA_STORAGE_ERROR.code() && version <= 3)
-                    errorCode = Errors.NOT_LEADER_FOR_PARTITION.code();
+                    errorCode = Errors.NOT_LEADER_OR_FOLLOWER.code();
                 Struct partStruct = topicData.instance(PARTITION_RESPONSES_KEY_NAME)
                         .set(PARTITION_ID, partitionEntry.getKey())
                         .set(ERROR_CODE, errorCode)
@@ -274,18 +275,19 @@ public class ProduceResponse extends AbstractResponse {
                 partStruct.setIfExists(LOG_APPEND_TIME_KEY_NAME, part.logAppendTime);
                 partStruct.setIfExists(LOG_START_OFFSET_FIELD, part.logStartOffset);
 
-                List<Struct> recordErrors = Collections.emptyList();
-                if (!part.recordErrors.isEmpty()) {
-                    recordErrors = new ArrayList<>();
-                    for (RecordError indexAndMessage : part.recordErrors) {
-                        Struct indexAndMessageStruct = partStruct.instance(RECORD_ERRORS_KEY_NAME)
-                                .set(BATCH_INDEX_KEY_NAME, indexAndMessage.batchIndex)
-                                .set(BATCH_INDEX_ERROR_MESSAGE_FIELD, indexAndMessage.message);
-                        recordErrors.add(indexAndMessageStruct);
+                if (partStruct.hasField(RECORD_ERRORS_KEY_NAME)) {
+                    List<Struct> recordErrors = Collections.emptyList();
+                    if (!part.recordErrors.isEmpty()) {
+                        recordErrors = new ArrayList<>();
+                        for (RecordError indexAndMessage : part.recordErrors) {
+                            Struct indexAndMessageStruct = partStruct.instance(RECORD_ERRORS_KEY_NAME)
+                                    .set(BATCH_INDEX_KEY_NAME, indexAndMessage.batchIndex)
+                                    .set(BATCH_INDEX_ERROR_MESSAGE_FIELD, indexAndMessage.message);
+                            recordErrors.add(indexAndMessageStruct);
+                        }
                     }
+                    partStruct.set(RECORD_ERRORS_KEY_NAME, recordErrors.toArray());
                 }
-
-                partStruct.setIfExists(RECORD_ERRORS_KEY_NAME, recordErrors.toArray());
 
                 partStruct.setIfExists(ERROR_MESSAGE_FIELD, part.errorMessage);
                 partitionArray.add(partStruct);
@@ -311,8 +313,9 @@ public class ProduceResponse extends AbstractResponse {
     @Override
     public Map<Errors, Integer> errorCounts() {
         Map<Errors, Integer> errorCounts = new HashMap<>();
-        for (PartitionResponse response : responses.values())
-            updateErrorCounts(errorCounts, response.error);
+        responses.values().forEach(response ->
+            updateErrorCounts(errorCounts, response.error)
+        );
         return errorCounts;
     }
 

@@ -18,6 +18,7 @@ package org.apache.kafka.test;
 
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
@@ -27,10 +28,13 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Windowed;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -60,8 +64,8 @@ public final class StreamsTestUtils {
         return props;
     }
 
-    public static Properties getStreamsConfig(final Serde keyDeserializer,
-                                              final Serde valueDeserializer) {
+    public static Properties getStreamsConfig(final Serde<?> keyDeserializer,
+                                              final Serde<?> valueDeserializer) {
         return getStreamsConfig(
                 UUID.randomUUID().toString(),
                 "localhost:9091",
@@ -71,12 +75,16 @@ public final class StreamsTestUtils {
     }
 
     public static Properties getStreamsConfig(final String applicationId) {
+        return getStreamsConfig(applicationId, new Properties());
+    }
+
+    public static Properties getStreamsConfig(final String applicationId, final Properties additional) {
         return getStreamsConfig(
             applicationId,
             "localhost:9091",
             Serdes.ByteArraySerde.class.getName(),
             Serdes.ByteArraySerde.class.getName(),
-            new Properties());
+            additional);
     }
 
     public static Properties getStreamsConfig() {
@@ -99,7 +107,9 @@ public final class StreamsTestUtils {
         kafkaStreams.start();
         assertThat(
             "KafkaStreams did not transit to RUNNING state within " + timeoutMs + " milli seconds.",
-            countDownLatch.await(timeoutMs, TimeUnit.MILLISECONDS), equalTo(true));
+            countDownLatch.await(timeoutMs, TimeUnit.MILLISECONDS),
+            equalTo(true)
+        );
     }
 
     public static <K, V> List<KeyValue<K, V>> toList(final Iterator<KeyValue<K, V>> iterator) {
@@ -111,8 +121,17 @@ public final class StreamsTestUtils {
         return results;
     }
 
-    public static <K, V> List<V> valuesToList(final Iterator<KeyValue<K, V>> iterator) {
-        final List<V> results = new ArrayList<>();
+    public static <K, V> Set<KeyValue<K, V>> toSet(final Iterator<KeyValue<K, V>> iterator) {
+        final Set<KeyValue<K, V>> results = new LinkedHashSet<>();
+
+        while (iterator.hasNext()) {
+            results.add(iterator.next());
+        }
+        return results;
+    }
+
+    public static <K, V> Set<V> valuesToSet(final Iterator<KeyValue<K, V>> iterator) {
+        final Set<V> results = new HashSet<>();
 
         while (iterator.hasNext()) {
             results.add(iterator.next().value);
@@ -195,5 +214,13 @@ public final class StreamsTestUtils {
         } else {
             return metric;
         }
+    }
+
+    public static boolean containsMetric(final Metrics metrics,
+                                         final String name,
+                                         final String group,
+                                         final Map<String, String> tags) {
+        final MetricName metricName = metrics.metricName(name, group, tags);
+        return metrics.metric(metricName) != null;
     }
 }
